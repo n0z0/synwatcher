@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dgraph-io/badger/v3"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
-	"go.etcd.io/bbolt"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -32,9 +32,7 @@ var (
 	// cache IP lokal dari device yang dipilih
 	localIPs = map[string]struct{}{}
 	//boltdb
-	dbPath      = "data.db"
-	usersBucket = "users"             // username -> bcrypt(password)
-	bktName     = []byte(usersBucket) // nama bucket
+	dbPath = "./data"
 )
 
 func main() {
@@ -82,24 +80,12 @@ func main() {
 	log.Printf("[*] BPF: %s", *bpf)
 
 	// Buka DB (akan membuat file jika belum ada)
-	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{
-		Timeout:         2 * time.Second,       // tunggu lock file jika dipakai proses lain
-		FreelistType:    bbolt.FreelistMapType, // freelist lebih efisien (disarankan)
-		InitialMmapSize: 32 * 1024 * 1024,      // opsional: kurangi remap awal
-	})
+	opts := badger.DefaultOptions(dbPath)
+	db, err := badger.Open(opts)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
-
-	// Buat bucket jika belum ada (WRITE TX)
-	err = db.Update(func(tx *bbolt.Tx) error {
-		_, e := tx.CreateBucketIfNotExists(bktName)
-		return e
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	src := gopacket.NewPacketSource(handle, handle.LinkType())
 	for pkt := range src.Packets() {
@@ -107,7 +93,7 @@ func main() {
 	}
 }
 
-func handlePacket(pkt gopacket.Packet, db *bbolt.DB) {
+func handlePacket(pkt gopacket.Packet, db *badger.DB) {
 	net := pkt.NetworkLayer()
 	//tr := pkt.TransportLayer()
 	if net == nil {
@@ -154,11 +140,21 @@ func handlePacket(pkt gopacket.Packet, db *bbolt.DB) {
 
 			// contoh aksi: simpan hash berdasarkan dstPort (seperti kode kamu)
 			hash, err := bcrypt.GenerateFromPassword([]byte(tcp.DstPort.String()), bcrypt.DefaultCost)
-			if err == nil {
-				_ = db.Update(func(tx *bbolt.Tx) error {
-					b := tx.Bucket(bktName)
-					return b.Put([]byte(srcIP), []byte(hash))
-				})
+			if err != nil {
+				log.Printf("Bcrypt: Gagal enkripsi: %v", err)
+			}
+			log.Println("Writer: Menulis data...")
+
+			err = db.Update(func(txn *badger.Txn) error {
+				key := []byte(srcIP)
+				value := []byte(hash)
+				return txn.Set(key, value)
+			})
+
+			if err != nil {
+				log.Printf("Writer: Gagal menulis: %v", err)
+			} else {
+				log.Println("Writer: Berhasil menulis!")
 			}
 			return
 		}
@@ -192,6 +188,26 @@ func handlePacket(pkt gopacket.Packet, db *bbolt.DB) {
 
 		log.Printf("[UDP] %s:%d -> %s:%d len=%d ts=%s",
 			srcIP, udp.SrcPort, dstIP, udp.DstPort, payloadLen, time.Now().Format(time.RFC3339Nano))
+
+		// contoh aksi: simpan hash berdasarkan dstPort (seperti kode kamu)
+		hash, err := bcrypt.GenerateFromPassword([]byte(udp.DstPort.String()), bcrypt.DefaultCost)
+		if err != nil {
+			log.Printf("Bcrypt: Gagal enkripsi: %v", err)
+		}
+		log.Println("Writer: Menulis data...")
+
+		err = db.Update(func(txn *badger.Txn) error {
+			key := []byte(srcIP)
+			value := []byte(hash)
+			return txn.Set(key, value)
+		})
+
+		if err != nil {
+			log.Printf("Writer: Gagal menulis: %v", err)
+		} else {
+			log.Println("Writer: Berhasil menulis!")
+		}
+
 		return
 	}
 
