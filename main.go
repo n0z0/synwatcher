@@ -22,7 +22,11 @@ var (
 	// Filter: TCP SYN (tanpa ACK) untuk ip & ip6
 	// Catatan: tcp[13] & 0x02 != 0  => SYN bit set
 	//          tcp[13] & 0x10 == 0  => ACK bit tidak set
-	bpf = flag.String("bpf", "(ip or ip6) and tcp and (tcp[13] & 0x02 != 0) and (tcp[13] & 0x10 == 0)", "BPF filter")
+	//-sS dan -sT nmap menghasilkan paket seperti ini
+	//bpfstring = "(ip or ip6) and tcp and (tcp[13] & 0x02 != 0) and (tcp[13] & 0x10 == 0)"
+	// -sU untuk UDP bisa ditambahkan nanti
+	bpfstring = "ip and ((tcp and (ip[6:2] & 0x1fff = 0) and (tcp[13] & 0x12 = 0x02)) or (udp and not (udp port 53 or 123 or 161 or 1900 or 5353)) or (icmp and icmp[0] = 3 and icmp[1] = 3))"
+	bpf       = flag.String("bpf", bpfstring, "BPF filter")
 	// cache IP lokal dari device yang dipilih
 	localIPs = map[string]struct{}{}
 	//boltdb
