@@ -9,27 +9,21 @@ import (
 	"log"
 	"net"
 	"os"
-	"time"
 
+	"github.com/dgraph-io/badger/v3"
 	"github.com/pkg/sftp"
-	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 )
 
 const (
-	dbPath         = "../data.db"
-	usersBucket    = "users"  // username -> bcrypt(password)
+	dbPath         = "../data"
 	privateKeyPath = "id_rsa" // host key file
 )
 
 func main() {
-	// DB dibuka read-only (server hanya baca)
-	db, err := bolt.Open(dbPath, 0400, &bolt.Options{
-		ReadOnly:     true,
-		Timeout:      2 * time.Second,
-		FreelistType: bolt.FreelistMapType,
-	})
+	opts := badger.DefaultOptions(dbPath)
+	db, err := badger.Open(opts)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -45,20 +39,23 @@ func main() {
 	config := &ssh.ServerConfig{
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 			var hashed []byte
-			if err := db.View(func(tx *bolt.Tx) error {
-				b := tx.Bucket([]byte(usersBucket))
-				if b == nil {
-					return fmt.Errorf("bucket %q tidak ada", usersBucket)
+			log.Println("Reader: Membaca data...")
+
+			err := db.View(func(txn *badger.Txn) error {
+				item, err := txn.Get([]byte(c.User()))
+				if err != nil {
+					return err // Akan error jika data belum ada
 				}
-				v := b.Get([]byte(c.User()))
-				if v == nil {
-					return fmt.Errorf("user %q tidak ditemukan", c.User())
-				}
-				// copy untuk keamanan
-				hashed = append([]byte(nil), v...)
-				return nil
-			}); err != nil {
-				return nil, err
+				return item.Value(func(val []byte) error {
+					log.Printf("Reader: Mendapat data -> %s\n", string(val))
+					// copy untuk keamanan
+					hashed = append([]byte(nil), val...)
+					return nil
+				})
+			})
+
+			if err != nil {
+				log.Printf("Reader: Gagal membaca (mungkin belum ada data): %v", err)
 			}
 
 			// verifikasi bcrypt
@@ -79,7 +76,7 @@ func main() {
 	}
 	defer ln.Close()
 
-	log.Printf("SFTP server listening on %s:%s (multi-user via Bolt bucket %q)", host, port, usersBucket)
+	log.Printf("SFTP server listening on %s:%s (multi-user via Data %q)", host, port, dbPath)
 
 	for {
 		conn, err := ln.Accept()
