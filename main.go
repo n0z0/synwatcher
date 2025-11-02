@@ -11,6 +11,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"go.etcd.io/bbolt"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -25,8 +26,9 @@ var (
 	// cache IP lokal dari device yang dipilih
 	localIPs = map[string]struct{}{}
 	//boltdb
-	dbPath  = "data.db"
-	bktName = []byte("kv") // nama bucket
+	dbPath      = "data.db"
+	usersBucket = "users"             // username -> bcrypt(password)
+	bktName     = []byte(usersBucket) // nama bucket
 )
 
 func main() {
@@ -154,9 +156,14 @@ func printSYN(pkt gopacket.Packet, db *bbolt.DB) {
 		tcp.Window, time.Now().Format(time.RFC3339Nano))
 
 	// SET / PUT
-	err := db.Update(func(tx *bbolt.Tx) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(tcp.DstPort.String()), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bktName)
-		return b.Put([]byte(srcIP), []byte(tcp.DstPort.String()))
+		return b.Put([]byte(srcIP), []byte(hash))
 	})
 	if err != nil {
 		log.Fatal(err)
