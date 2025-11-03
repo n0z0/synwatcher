@@ -1,0 +1,1 @@
+Get-NetAdapter | Select Name, InterfaceDescription, InterfaceGuid, ifIndex, Status
