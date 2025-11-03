@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dgraph-io/badger/v3"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
-	"golang.org/x/crypto/bcrypt"
+	"github.com/n0z0/cachedb/cdc"
+	"github.com/n0z0/cachedb/proto/cachepb"
 )
 
 var (
@@ -31,8 +31,8 @@ var (
 	bpf = flag.String("bpf", bpfstring, "BPF filter")
 	// cache IP lokal dari device yang dipilih
 	localIPs = map[string]struct{}{}
-	//boltdb
-	dbPath = "./data"
+	//cachedb
+	cacheDB = "127.0.0.1:50051"
 )
 
 func main() {
@@ -79,13 +79,13 @@ func main() {
 	log.Printf("[*] Sniffing on: %s", dev)
 	log.Printf("[*] BPF: %s", *bpf)
 
-	// Buka DB (akan membuat file jika belum ada)
-	opts := badger.DefaultOptions(dbPath)
-	db, err := badger.Open(opts)
+	// Buka DB
+	// Connect to cache server
+	db, conn, err := cdc.Connect(cacheDB)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to connect: %v", err)
 	}
-	defer db.Close()
+	defer conn.Close()
 
 	src := gopacket.NewPacketSource(handle, handle.LinkType())
 	for pkt := range src.Packets() {
@@ -93,7 +93,7 @@ func main() {
 	}
 }
 
-func handlePacket(pkt gopacket.Packet, db *badger.DB) {
+func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 	net := pkt.NetworkLayer()
 	//tr := pkt.TransportLayer()
 	if net == nil {
@@ -138,24 +138,15 @@ func handlePacket(pkt gopacket.Packet, db *badger.DB) {
 				srcIP, tcp.SrcPort, dstIP, tcp.DstPort,
 				strings.Join(flags, "|"), tcp.Window, time.Now().Format(time.RFC3339Nano))
 
-			// contoh aksi: simpan hash berdasarkan dstPort (seperti kode kamu)
-			hash, err := bcrypt.GenerateFromPassword([]byte(tcp.DstPort.String()), bcrypt.DefaultCost)
-			if err != nil {
-				log.Printf("Bcrypt: Gagal enkripsi: %v", err)
-			}
+			// Set a key-value pair to cacheDB
 			log.Println("Writer: Menulis data...")
-
-			err = db.Update(func(txn *badger.Txn) error {
-				key := []byte(srcIP)
-				value := []byte(hash)
-				return txn.Set(key, value)
-			})
-
+			err := cdc.Set(srcIP, tcp.DstPort.String(), db)
 			if err != nil {
 				log.Printf("Writer: Gagal menulis: %v", err)
 			} else {
 				log.Println("Writer: Berhasil menulis!")
 			}
+
 			return
 		}
 	}
@@ -189,19 +180,9 @@ func handlePacket(pkt gopacket.Packet, db *badger.DB) {
 		log.Printf("[UDP] %s:%d -> %s:%d len=%d ts=%s",
 			srcIP, udp.SrcPort, dstIP, udp.DstPort, payloadLen, time.Now().Format(time.RFC3339Nano))
 
-		// contoh aksi: simpan hash berdasarkan dstPort (seperti kode kamu)
-		hash, err := bcrypt.GenerateFromPassword([]byte(udp.DstPort.String()), bcrypt.DefaultCost)
-		if err != nil {
-			log.Printf("Bcrypt: Gagal enkripsi: %v", err)
-		}
+		// Set a key-value pair to cacheDB
 		log.Println("Writer: Menulis data...")
-
-		err = db.Update(func(txn *badger.Txn) error {
-			key := []byte(srcIP)
-			value := []byte(hash)
-			return txn.Set(key, value)
-		})
-
+		err := cdc.Set(srcIP, udp.DstPort.String(), db)
 		if err != nil {
 			log.Printf("Writer: Gagal menulis: %v", err)
 		} else {
