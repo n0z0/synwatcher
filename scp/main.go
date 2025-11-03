@@ -10,24 +10,25 @@ import (
 	"net"
 	"os"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/n0z0/cachedb/cdc"
 	"github.com/pkg/sftp"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 )
 
 const (
-	dbPath         = "../data"
-	privateKeyPath = "id_rsa" // host key file
+	cacheDB        = "127.0.0.1:50051" // gRPC cache DB address
+	privateKeyPath = "id_rsa"          // host key file
+	host           = "0.0.0.0"
+	port           = "2022"
 )
 
 func main() {
-	opts := badger.DefaultOptions(dbPath)
-	db, err := badger.Open(opts)
+	// Connect to cache DB server
+	db, conn, err := cdc.Connect(cacheDB)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to connect: %v", err)
 	}
-	defer db.Close()
+	defer conn.Close()
 
 	// Siapkan host key
 	privateKey, err := generateHostKey(privateKeyPath)
@@ -38,28 +39,21 @@ func main() {
 	// PasswordCallback membaca dari Bolt **setiap kali login** (hot-reload user)
 	config := &ssh.ServerConfig{
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			var hashed []byte
 			log.Println("Reader: Membaca data...")
-
-			err := db.View(func(txn *badger.Txn) error {
-				item, err := txn.Get([]byte(c.User()))
-				if err != nil {
-					return err // Akan error jika data belum ada
-				}
-				return item.Value(func(val []byte) error {
-					log.Printf("Reader: Mendapat data -> %s\n", string(val))
-					// copy untuk keamanan
-					hashed = append([]byte(nil), val...)
-					return nil
-				})
-			})
+			// Get a value by key
+			value, err := cdc.Get(c.User(), db)
+			if err != nil {
+				log.Printf("Reader: Gagal membaca data %s: %v", c.User(), err)
+			} else {
+				log.Printf("Reader: Mendapat data ->%s : %s\n", c.User(), value)
+			}
 
 			if err != nil {
 				log.Printf("Reader: Gagal membaca (mungkin belum ada data): %v", err)
 			}
 
 			// verifikasi bcrypt
-			if bcrypt.CompareHashAndPassword(hashed, pass) == nil {
+			if string(pass) == value {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("password rejected for %q", c.User())
@@ -67,16 +61,13 @@ func main() {
 	}
 	config.AddHostKey(privateKey)
 
-	host := "0.0.0.0"
-	port := "2022"
-
 	ln, err := net.Listen("tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		log.Fatalf("Failed to listen on %s:%s: %v", host, port, err)
 	}
 	defer ln.Close()
 
-	log.Printf("SFTP server listening on %s:%s (multi-user via Data %q)", host, port, dbPath)
+	log.Printf("SFTP server listening on %s:%s (multi-user via Data %q)", host, port, cacheDB)
 
 	for {
 		conn, err := ln.Accept()
