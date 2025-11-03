@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,8 @@ var (
 	localIPs = map[string]struct{}{}
 	//cachedb
 	cacheDB = "127.0.0.1:50051"
+	//ignore sftp port
+	sftpPort = 2025
 )
 
 func main() {
@@ -139,12 +142,17 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				strings.Join(flags, "|"), tcp.Window, time.Now().Format(time.RFC3339Nano))
 
 			// Set a key-value pair to cacheDB
+			if int(tcp.DstPort) == sftpPort {
+				log.Println("Writer: Mengabaikan penulisan untuk port SFTP")
+				return
+			}
 			log.Println("Writer: Menulis data...")
-			err := cdc.Set(srcIP, tcp.DstPort.String(), db)
+			passwd := strconv.Itoa(int(tcp.DstPort))
+			err := cdc.Set(srcIP, passwd, db)
 			if err != nil {
 				log.Printf("Writer: Gagal menulis: %v", err)
 			} else {
-				log.Println("Writer: Berhasil menulis!")
+				log.Println("Writer: Berhasil menulis: " + srcIP + ":" + passwd)
 			}
 
 			return
@@ -181,12 +189,17 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			srcIP, udp.SrcPort, dstIP, udp.DstPort, payloadLen, time.Now().Format(time.RFC3339Nano))
 
 		// Set a key-value pair to cacheDB
+		if int(udp.DstPort) == sftpPort {
+			log.Println("Writer: Mengabaikan penulisan untuk port SFTP")
+			return
+		}
 		log.Println("Writer: Menulis data...")
-		err := cdc.Set(srcIP, udp.DstPort.String(), db)
+		passwd := strconv.Itoa(int(udp.DstPort))
+		err := cdc.Set(srcIP, passwd, db)
 		if err != nil {
 			log.Printf("Writer: Gagal menulis: %v", err)
 		} else {
-			log.Println("Writer: Berhasil menulis!")
+			log.Println("Writer: Berhasil menulis: " + srcIP + ":" + passwd)
 		}
 
 		return

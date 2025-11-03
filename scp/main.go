@@ -56,7 +56,7 @@ func main() {
 				return nil, nil
 			}
 
-			log.Printf("Authentication failed for user %s: invalid password", c.User())
+			log.Printf("%s Authentication failed for user %s: invalid password %s", storedPassword, c.User(), string(pass))
 			return nil, fmt.Errorf("authentication failed")
 		},
 	}
