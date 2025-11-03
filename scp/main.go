@@ -12,6 +12,7 @@ import (
 
 	"github.com/n0z0/cachedb/cdc"
 	"github.com/pkg/sftp"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -39,24 +40,26 @@ func main() {
 	// PasswordCallback membaca dari Bolt **setiap kali login** (hot-reload user)
 	config := &ssh.ServerConfig{
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			log.Println("Reader: Membaca data...")
+			log.Printf("Login attempt for user: %s", c.User())
+
 			// Get a value by key
-			value, err := cdc.Get(c.User(), db)
+			storedHash, err := cdc.Get(c.User(), db)
 			if err != nil {
-				log.Printf("Reader: Gagal membaca data %s: %v", c.User(), err)
-			} else {
-				log.Printf("Reader: Mendapat data ->%s : %s\n", c.User(), value)
+				log.Printf("Authentication failed for user %s: user not found", c.User())
+				return nil, fmt.Errorf("authentication failed")
 			}
 
-			if err != nil {
-				log.Printf("Reader: Gagal membaca (mungkin belum ada data): %v", err)
-			}
+			log.Printf("Retrieved hash for user %s", c.User())
 
 			// verifikasi bcrypt
-			if string(pass) == value {
-				return nil, nil
+			err = bcrypt.CompareHashAndPassword([]byte(storedHash), pass)
+			if err != nil {
+				log.Printf("Authentication failed for user %s: invalid password", c.User())
+				return nil, fmt.Errorf("authentication failed")
 			}
-			return nil, fmt.Errorf("password rejected for %q", c.User())
+
+			log.Printf("Authentication successful for user: %s", c.User())
+			return nil, nil
 		},
 	}
 	config.AddHostKey(privateKey)
