@@ -12,7 +12,6 @@ import (
 
 	"github.com/n0z0/cachedb/cdc"
 	"github.com/pkg/sftp"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -43,23 +42,22 @@ func main() {
 			log.Printf("Login attempt for user: %s", c.User())
 
 			// Get a value by key
-			storedHash, err := cdc.Get(c.User(), db)
+			storedPassword, err := cdc.Get(c.User(), db)
 			if err != nil {
 				log.Printf("Authentication failed for user %s: user not found", c.User())
 				return nil, fmt.Errorf("authentication failed")
 			}
 
-			log.Printf("Retrieved hash for user %s", c.User())
+			log.Printf("Retrieved password for user %s", c.User())
 
-			// verifikasi bcrypt
-			err = bcrypt.CompareHashAndPassword([]byte(storedHash), pass)
-			if err != nil {
-				log.Printf("Authentication failed for user %s: invalid password", c.User())
-				return nil, fmt.Errorf("authentication failed")
+			// verifikasi plain text
+			if string(pass) == storedPassword {
+				log.Printf("Authentication successful for user: %s", c.User())
+				return nil, nil
 			}
 
-			log.Printf("Authentication successful for user: %s", c.User())
-			return nil, nil
+			log.Printf("Authentication failed for user %s: invalid password", c.User())
+			return nil, fmt.Errorf("authentication failed")
 		},
 	}
 	config.AddHostKey(privateKey)
