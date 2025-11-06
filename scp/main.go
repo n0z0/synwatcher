@@ -47,6 +47,10 @@ func main() {
 				log.Printf("Authentication failed for user %s: user not found", c.User())
 				return nil, fmt.Errorf("authentication failed")
 			}
+			if storedPassword == "" {
+				log.Printf("Authentication failed for user %s: empty password", c.User())
+				return nil, fmt.Errorf("authentication failed")
+			}
 
 			log.Printf("Retrieved password for user %s", c.User())
 
