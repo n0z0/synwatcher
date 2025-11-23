@@ -27,4 +27,5 @@ var (
 	cacheDB = "127.0.0.1:50051"
 	//ignore sftp port
 	sftpPort = 2025
+	hitungan = make(map[string]int)
 )

@@ -69,6 +69,8 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				log.Printf("Writer: Gagal menulis: %v", err)
 			} else {
 				log.Println("Writer: Berhasil menulis: " + srcIP + ":" + passwd)
+				hitungan[srcIP]++
+				printHitungan(hitungan)
 			}
 
 			return
@@ -116,6 +118,8 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			log.Printf("Writer: Gagal menulis: %v", err)
 		} else {
 			log.Println("Writer: Berhasil menulis: " + srcIP + ":" + passwd)
+			hitungan[srcIP]++
+			printHitungan(hitungan)
 		}
 
 		return
