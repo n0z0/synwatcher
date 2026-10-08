@@ -32,12 +32,31 @@ flowchart LR
 3. **cacheDB** berjalan di `127.0.0.1:50051`
 4. (Opsional) **scp** berjalan di port `60606`
 
-### Instalasi
+### Instalasi & Upgrade Otomatis
 
-Unduh `synwatcher_vX.Y.Z_windows_amd64.zip` dari halaman
-[Releases](https://github.com/n0z0/synwatcher/releases/latest), lalu ekstrak.
+#### Windows (PowerShell)
+Buka PowerShell dan jalankan perintah satu baris berikut untuk memasang versi terbaru dan otomatis mendaftarkannya ke PATH pengguna:
+```powershell
+irm https://raw.githubusercontent.com/n0z0/synwatcher/main/install.ps1 | iex
+```
+*(Skrip ini juga bisa dijalankan kapan saja untuk upgrade ke versi terbaru).*
+
+#### Linux (Bash)
+Jalankan perintah berikut di terminal:
+```bash
+curl -fsSL https://raw.githubusercontent.com/n0z0/synwatcher/main/install.sh | bash
+```
+*(Binary otomatis dipasang ke `/usr/local/bin` atau `~/.local/bin` dan siap dipanggil langsung).*
+
+---
+
+### Instalasi Manual (Unduh Zip/Tar.gz)
+
+Unduh paket dari halaman [Releases](https://github.com/n0z0/synwatcher/releases/latest), lalu ekstrak:
+- **Windows:** `synwatcher_vX.Y.Z_windows_amd64.zip`
+- **Linux:** `synwatcher_vX.Y.Z_linux_amd64.tar.gz`
+
 Untuk memeriksa integritas file, cocokkan hash-nya dengan `checksums.txt`:
-
 ```powershell
 Get-FileHash .\synwatcher_*_windows_amd64.zip -Algorithm SHA256
 ```
