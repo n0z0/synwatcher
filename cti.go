@@ -42,9 +42,10 @@ type CTIEvent struct {
 }
 
 type EndpointInfo struct {
-	IP        string `json:"ip"`
-	Port      int    `json:"port,omitempty"`
-	IsPrivate bool   `json:"is_private"`
+	IP         string `json:"ip"`
+	Port       int    `json:"port,omitempty"`
+	IsPrivate  bool   `json:"is_private"`
+	ReverseDNS string `json:"reverse_dns,omitempty"`
 }
 
 type IPLayerInfo struct {

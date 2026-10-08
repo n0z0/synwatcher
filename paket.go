@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"log"
+	netpkg "net"
 	"strconv"
 	"strings"
 	"time"
@@ -90,6 +92,17 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 						Flags:      tcpFlags,
 						Options:    tcpOptions,
 					}
+
+					// Async reverse DNS resolution non-blocking
+					if !ctiEvent.Source.IsPrivate && srcIP != "127.0.0.1" && srcIP != "::1" {
+						ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+						var r netpkg.Resolver
+						if names, err := r.LookupAddr(ctx, srcIP); err == nil && len(names) > 0 {
+							ctiEvent.Source.ReverseDNS = strings.TrimSuffix(names[0], ".")
+						}
+						cancel()
+					}
+
 					ctiLogger.LogEvent(ctiEvent)
 
 					// Inter-Service Threat Intelligence correlation ke CacheDB
@@ -104,6 +117,9 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 						_ = cdc.Set("actor:scanner:"+srcIP, ctiEvent.ScannerTool, client)
 						_ = cdc.Set("actor:scan_hits:"+srcIP, strconv.Itoa(hits), client)
 						_ = cdc.Set("actor:last_scan:"+srcIP, ctiEvent.Timestamp, client)
+						if ctiEvent.Source.ReverseDNS != "" {
+							_ = cdc.Set("actor:rdns:"+srcIP, ctiEvent.Source.ReverseDNS, client)
+						}
 					}
 				}
 			}(srcIP, dstIP, int(tcp.SrcPort), int(tcp.DstPort), tcp.Window, tcp.Seq, tcp.Ack, flags, options, pkt, db, hitCount)
@@ -165,6 +181,16 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 					Length:     udpLen,
 					PayloadLen: pLen,
 				}
+
+				if !ctiEvent.Source.IsPrivate && srcIP != "127.0.0.1" && srcIP != "::1" {
+					ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+					var r netpkg.Resolver
+					if names, err := r.LookupAddr(ctx, srcIP); err == nil && len(names) > 0 {
+						ctiEvent.Source.ReverseDNS = strings.TrimSuffix(names[0], ".")
+					}
+					cancel()
+				}
+
 				ctiLogger.LogEvent(ctiEvent)
 
 				if client != nil {
@@ -177,6 +203,9 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 					_ = cdc.Set("actor:scanner:"+srcIP, "UDP Probe", client)
 					_ = cdc.Set("actor:scan_hits:"+srcIP, strconv.Itoa(hits), client)
 					_ = cdc.Set("actor:last_scan:"+srcIP, ctiEvent.Timestamp, client)
+					if ctiEvent.Source.ReverseDNS != "" {
+						_ = cdc.Set("actor:rdns:"+srcIP, ctiEvent.Source.ReverseDNS, client)
+					}
 				}
 			}
 		}(srcIP, dstIP, int(udp.SrcPort), int(udp.DstPort), udp.Length, payloadLen, pkt, db, hitCount)
