@@ -7,9 +7,10 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
-func recordAndPrintHitungan(srcIP string) {
+func recordHitAndGetCount(srcIP string) int {
 	hitunganMu.Lock()
 	hitungan[srcIP]++
+	count := hitungan[srcIP]
 	table := tablewriter.NewWriter(os.Stdout)
 	table.Header([]string{"IP", "Jumlah"})
 	for kata, jumlah := range hitungan {
@@ -19,6 +20,11 @@ func recordAndPrintHitungan(srcIP string) {
 
 	fmt.Println("--- Hasil Hitungan ---")
 	table.Render()
+	return count
+}
+
+func recordAndPrintHitungan(srcIP string) {
+	recordHitAndGetCount(srcIP)
 }
 
 func printHitungan(hitungan map[string]int) {

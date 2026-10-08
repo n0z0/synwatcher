@@ -207,25 +207,33 @@ Integritas semua file dapat diverifikasi dengan `checksums.txt`.
 | `-timeout` | `BlockForever`          | Timeout pembacaan pcap                       |
 | `-version` |                         | Tampilkan versi lalu keluar                  |
 
-### Data Log untuk Cyber Threat Intelligence (CTI)
+### Data Log untuk Cyber Threat Intelligence (CTI SOC-Grade)
 
 Secara default, setiap aktivitas reconnaissance otomatis dicatat ke file **`synwatcher_cti.jsonl`** dalam format JSON Lines yang siap di-ingest ke SIEM, Elastic, Wazuh, atau MISP/OpenCTI.
 
-Data log mencakup informasi pasif fingerprinting dan MITRE ATT&CK:
-- **Identitas**: Timestamp ISO 8601 UTC, Sensor ID, Event Type.
+Data log telah memenuhi standar **Advanced Cyber Threat Intelligence (SOC-Grade)** mencakup:
+- **Identitas & Perilaku**: Timestamp ISO 8601 UTC, Sensor ID, Event Type, **`scan_behavior`** (`SINGLE_PORT_KNOCK` vs `PORT_SWEEP_SCAN`), dan **`scan_hit_count`**.
+- **Passive OS Fingerprinting**: **`estimated_os`** (Linux/Android/macOS, Windows, Network Appliance) serta **`estimated_hops`** berdasarkan initial TTL dan TCP stack.
+- **Scanner Tool Footprinting**: **`scanner_tool`** (mendeteksi *Nmap Stealth SYN Scan*, *Masscan*, *ZMap*, atau *Standard OS Socket / PowerShell / Browser*).
 - **Source & Target**: IP, Port, status `is_private`.
-- **IP Layer Forensics**: TTL (estimasi OS & hop count), IP ID, IP Length.
-- **TCP Layer Forensics**: Window Size, Sequence number, Flags, dan **TCP Options** (urutan MSS, WScale, SACK, TS untuk passive OS / scanner fingerprinting ala *p0f*).
-- **MITRE ATT&CK Mapping**: Tactic `Reconnaissance`, Technique `Network Service Discovery` (`T1046`).
+- **IP Layer Forensics**: TTL, IP ID, IP Length, Protocol.
+- **TCP Layer Forensics**: Window Size, Sequence number, Flags, dan **TCP Options** (`MSS`, `WScale`, `SACKPerm`, `TS`, `NOP`).
+- **MITRE ATT&CK Mapping**: Tactic `Reconnaissance`, Technique `Network Service Discovery` (`T1046`) atau `Active Scanning: Port Scanning` (`T1595.002`).
+- **Inter-Service CacheDB Threat Intel**: Selain menyimpan password SFTP, synwatcher otomatis menginjeksi metadata pelaku (`actor:os:<IP>`, `actor:scanner:<IP>`, `actor:scan_hits:<IP>`) ke CacheDB sehingga server `scp` dan dashboard SIEM langsung mengenali identitas penyerang saat login!
 
-Contoh satu baris log:
+Contoh satu baris log SOC-Grade:
 ```json
 {
   "timestamp": "2026-10-08T01:40:15.123456789Z",
   "sensor_id": "honeypot-node-1",
   "event_type": "TCP_SYN_SCAN",
+  "scan_behavior": "PORT_SWEEP_SCAN",
+  "scan_hit_count": 8,
+  "estimated_os": "Linux / Android / macOS",
+  "estimated_hops": 0,
+  "scanner_tool": "Nmap (Stealth SYN Scan)",
   "source": {"ip": "192.168.1.150", "port": 54321, "is_private": true},
-  "target": {"ip": "192.168.1.10", "port": 22, "is_private": true},
+  "target": {"ip": "192.168.1.10", "port": 8080, "is_private": true},
   "ip_layer": {"version": 4, "ttl": 64, "id": 41235, "protocol": "TCP", "length": 60},
   "tcp_layer": {
     "seq": 298123712,
@@ -236,8 +244,8 @@ Contoh satu baris log:
   },
   "mitre_attack": {
     "tactic": "Reconnaissance",
-    "technique": "Network Service Discovery",
-    "technique_id": "T1046"
+    "technique": "Active Scanning: Scanning IP Blocks / Ports",
+    "technique_id": "T1595.002"
   }
 }
 ```

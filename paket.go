@@ -58,21 +58,25 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				flags = append(flags, "URG")
 			}
 
+			hitCount := recordHitAndGetCount(srcIP)
+			options := formatTCPOptions(tcp.Options)
+
 			log.Printf("[SYN] %s:%d -> %s:%d flags=%s win=%d ts=%s",
 				srcIP, tcp.SrcPort, dstIP, tcp.DstPort,
 				strings.Join(flags, "|"), tcp.Window, time.Now().Format(time.RFC3339Nano))
 
 			// Log ke CTI JSONL
+			var ctiEvent *CTIEvent
 			if ctiLogger != nil {
-				event := newCTIBaseEvent("TCP_SYN_SCAN", srcIP, int(tcp.SrcPort), dstIP, int(tcp.DstPort), pkt)
-				event.TCPLayer = &TCPLayerInfo{
+				ctiEvent = newCTIBaseEvent("TCP_SYN_SCAN", srcIP, int(tcp.SrcPort), dstIP, int(tcp.DstPort), pkt, hitCount, tcp.Window, options)
+				ctiEvent.TCPLayer = &TCPLayerInfo{
 					SeqNum:     tcp.Seq,
 					AckNum:     tcp.Ack,
 					WindowSize: tcp.Window,
 					Flags:      flags,
-					Options:    formatTCPOptions(tcp.Options),
+					Options:    options,
 				}
-				ctiLogger.LogEvent(event)
+				ctiLogger.LogEvent(ctiEvent)
 			}
 
 			// Set a key-value pair to cacheDB
@@ -87,7 +91,13 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				log.Printf("Writer: Gagal menulis: %v", err)
 			} else {
 				log.Println("Writer: Berhasil menulis: " + srcIP + ":" + passwd)
-				recordAndPrintHitungan(srcIP)
+				// Korelasi data CTI intelijen ke CacheDB (Inter-Service Threat Intelligence)
+				if ctiEvent != nil {
+					_ = cdc.Set("actor:os:"+srcIP, ctiEvent.EstimatedOS, db)
+					_ = cdc.Set("actor:scanner:"+srcIP, ctiEvent.ScannerTool, db)
+					_ = cdc.Set("actor:scan_hits:"+srcIP, strconv.Itoa(hitCount), db)
+					_ = cdc.Set("actor:last_scan:"+srcIP, ctiEvent.Timestamp, db)
+				}
 			}
 
 			return
@@ -120,17 +130,20 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			payloadLen = 0
 		}
 
+		hitCount := recordHitAndGetCount(srcIP)
+
 		log.Printf("[UDP] %s:%d -> %s:%d len=%d ts=%s",
 			srcIP, udp.SrcPort, dstIP, udp.DstPort, payloadLen, time.Now().Format(time.RFC3339Nano))
 
 		// Log ke CTI JSONL
+		var ctiEvent *CTIEvent
 		if ctiLogger != nil {
-			event := newCTIBaseEvent("UDP_PROBE", srcIP, int(udp.SrcPort), dstIP, int(udp.DstPort), pkt)
-			event.UDPLayer = &UDPLayerInfo{
+			ctiEvent = newCTIBaseEvent("UDP_PROBE", srcIP, int(udp.SrcPort), dstIP, int(udp.DstPort), pkt, hitCount, 0, nil)
+			ctiEvent.UDPLayer = &UDPLayerInfo{
 				Length:     udp.Length,
 				PayloadLen: payloadLen,
 			}
-			ctiLogger.LogEvent(event)
+			ctiLogger.LogEvent(ctiEvent)
 		}
 
 		// Set a key-value pair to cacheDB
@@ -145,7 +158,12 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			log.Printf("Writer: Gagal menulis: %v", err)
 		} else {
 			log.Println("Writer: Berhasil menulis: " + srcIP + ":" + passwd)
-			recordAndPrintHitungan(srcIP)
+			if ctiEvent != nil {
+				_ = cdc.Set("actor:os:"+srcIP, ctiEvent.EstimatedOS, db)
+				_ = cdc.Set("actor:scanner:"+srcIP, "UDP Probe", db)
+				_ = cdc.Set("actor:scan_hits:"+srcIP, strconv.Itoa(hitCount), db)
+				_ = cdc.Set("actor:last_scan:"+srcIP, ctiEvent.Timestamp, db)
+			}
 		}
 
 		return
@@ -175,7 +193,7 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 						time.Now().Format(time.RFC3339Nano))
 
 					if ctiLogger != nil {
-						event := newCTIBaseEvent("ICMP_PORT_UNREACHABLE", srcIP, 0, dstIP, 0, pkt)
+						event := newCTIBaseEvent("ICMP_PORT_UNREACHABLE", srcIP, 0, dstIP, 0, pkt, 1, 0, nil)
 						event.ICMPLayer = &ICMPLayerInfo{
 							Type: uint8(icmp.TypeCode.Type()),
 							Code: icmp.TypeCode.Code(),
@@ -203,7 +221,7 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				time.Now().Format(time.RFC3339Nano))
 
 			if ctiLogger != nil {
-				event := newCTIBaseEvent("ICMP_PORT_UNREACHABLE", srcIP, 0, dstIP, 0, pkt)
+				event := newCTIBaseEvent("ICMP_PORT_UNREACHABLE", srcIP, 0, dstIP, 0, pkt, 1, 0, nil)
 				event.ICMPLayer = &ICMPLayerInfo{
 					Type: uint8(icmp.TypeCode.Type()),
 					Code: icmp.TypeCode.Code(),
