@@ -44,6 +44,11 @@ jobs:
           go-version-file: go.mod
 
       - name: Vet
+        # Target Windows: di Linux gopacket/pcap butuh cgo + libpcap sehingga vet gagal
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
         run: go vet ./...
 
       - name: Tentukan versi
@@ -84,7 +89,7 @@ jobs:
           (cd dist && sha256sum *.zip > checksums.txt)
           ls -l dist
 
-      - name: Buat tag (mode tombol)
+      - name: Buat tag (push ke main / tombol)
         if: github.ref_type != 'tag'
         env:
           VERSION: ${{ steps.ver.outputs.version }}
