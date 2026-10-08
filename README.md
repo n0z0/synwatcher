@@ -22,6 +22,108 @@ flowchart LR
 
 ---
 
+## Panduan Scanning Port (Cara Mendapatkan Password Login)
+
+Honeypot ini menggunakan konsep dinamis: **port terakhir yang Anda scan otomatis menjadi password Anda**, dan **alamat IP mesin Anda sendiri menjadi username**.
+
+```
+Contoh:
+Jika IP Anda adalah 192.168.1.50 dan Anda men-scan port 8080 pada server target,
+maka username Anda = 192.168.1.50 dan password Anda = 8080.
+```
+
+---
+
+### Cara 1: Menggunakan Nmap (Standar Pentesting)
+
+#### 1. Instalasi Nmap
+
+* **Windows (PowerShell)**:
+  ```powershell
+  winget install Insecure.Nmap
+  ```
+  *(Atau unduh installer resmi `.exe` dari [nmap.org/download.html](https://nmap.org/download.html))*.
+* **Linux (Debian / Ubuntu / Kali)**:
+  ```bash
+  sudo apt update && sudo apt install -y nmap
+  ```
+* **macOS (Homebrew)**:
+  ```bash
+  brew install nmap
+  ```
+
+#### 2. Menjalankan Scanning Port dengan Nmap
+
+* **Scan satu port tertentu (Paling disarankan agar password langsung diketahui)**:
+  ```bash
+  nmap -p 8080 <IP_TARGET>
+  ```
+  *(Setelah perintah ini selesai, synwatcher langsung mencatat password Anda = `8080`)*.
+
+* **SYN Stealth Scan (cepat, membutuhkan hak Administrator/root)**:
+  ```bash
+  sudo nmap -sS -p 8080 <IP_TARGET>
+  ```
+
+* **Fast Scan range port umum**:
+  ```bash
+  nmap -F <IP_TARGET>
+  ```
+  *(Password Anda adalah port tertinggi/terakhir yang disentuh oleh nmap)*.
+
+---
+
+### Cara 2: Lebih Cepat & Simpel (Tanpa Perlu Install Nmap!)
+
+Jika Anda tidak memiliki Nmap atau tidak ingin menginstal Npcap/Nmap di mesin Anda, Anda bisa menggunakan alat bawaan sistem:
+
+#### Opsi A: PowerShell (Bawaan Windows 10/11 - Paling Mudah)
+Cukup jalankan satu baris perintah bawaan Windows:
+```powershell
+Test-NetConnection -ComputerName <IP_TARGET> -Port 8080
+```
+> **Kenapa berhasil?** Perintah ini langsung mengirimkan paket `TCP SYN` ke port target, yang otomatis ditangkap oleh `synwatcher` dan mengeset password Anda menjadi `8080`.
+
+#### Opsi B: Web Browser (Chrome / Edge / Firefox - Paling Simpel)
+Buka browser favorit Anda dan ketik URL IP target beserta port yang Anda inginkan di bilah alamat:
+```text
+http://<IP_TARGET>:8080/
+```
+> Meskipun web browser menampilkan pesan *This site can't be reached*, browser telah berhasil mengirimkan paket TCP SYN ke port `8080`, dan synwatcher sudah menguncinya sebagai password Anda!
+
+#### Opsi C: Curl (Bawaan Windows 10/11 & Linux)
+Buka terminal dan jalankan:
+```bash
+curl http://<IP_TARGET>:8080/ --connect-timeout 2
+```
+
+#### Opsi D: Netcat / `nc` (Linux / macOS / WSL)
+```bash
+nc -zv <IP_TARGET> 8080
+```
+
+---
+
+### Langkah Login ke Server SFTP (`scp`)
+
+Setelah menyentuh port (misalnya port `8080`), segera login ke server SFTP honeypot di port `60606`:
+
+```bash
+sftp -P 60606 <IP_ANDA>@<IP_TARGET>
+```
+
+Contoh jika IP mesin Anda adalah `192.168.123.45` dan target berada di `192.168.123.102`:
+```bash
+sftp -P 60606 192.168.123.45@192.168.123.102
+```
+Saat diminta password, masukkan nomor port yang baru saja Anda sentuh:
+```text
+192.168.123.45@192.168.123.102's password: 8080
+```
+Anda akan berhasil masuk ke sesi SFTP, dan honeypot akan memproses forensik file serta mencatat log CTI!
+
+---
+
 ## Untuk pengguna
 
 ### Kebutuhan
