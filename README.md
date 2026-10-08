@@ -16,7 +16,7 @@ menerima login dengan:
 flowchart LR
     A[Penyerang] -- "SYN / UDP probe ke port X" --> B[synwatcher]
     B -- "Set(IP, X)" --> C[(cacheDB :50051)]
-    A -- "login SFTP user=IP pass=X" --> D[scp :2025]
+    A -- "login SFTP user=IP pass=X" --> D[scp :60606]
     D -- "Get(IP)" --> C
 ```
 
@@ -30,7 +30,7 @@ flowchart LR
 2. **[Npcap](https://npcap.com/#download)**: saat instalasi, centang
    *Install Npcap in WinPcap API-compatible Mode*
 3. **cacheDB** berjalan di `127.0.0.1:50051`
-4. (Opsional) **scp** berjalan di port `2025`
+4. (Opsional) **scp** berjalan di port `60606`
 
 ### Instalasi
 
@@ -76,6 +76,7 @@ Get-FileHash .\synwatcher_*_windows_amd64.zip -Algorithm SHA256
 | Flag       | Default                 | Keterangan                                   |
 |------------|-------------------------|----------------------------------------------|
 | `-iface`   | *(auto)*                | Nama device Npcap `\Device\NPF_{GUID}`       |
+| `-sftpport`| `60606`                 | Port SFTP honeypot yang diabaikan (agar koneksi login tidak menimpa password) |
 | `-logfile` | `synwatcher_cti.jsonl`  | File output log CTI (format JSONL, kosongkan untuk mematikan) |
 | `-sensor`  | *(hostname)*            | Identifier sensor node honeypot              |
 | `-bpf`     | *(lihat bawah)*         | Filter BPF untuk paket yang ditangkap        |
@@ -130,7 +131,7 @@ Contoh satu baris log:
 Semua paket hanya diproses jika **tujuannya IP mesin ini**. Paket berikut diabaikan:
 
 - trafik keluar dari mesin ini sendiri dan loopback
-- port SFTP honeypot (`2025`), supaya login ke SFTP tidak menimpa password
+- port SFTP honeypot (`60606` atau sesuai `-sftpport`), supaya login ke SFTP tidak menimpa password
 - UDP port `53, 443, 123, 161, 1900, 5353` (DNS, QUIC, NTP, SNMP, SSDP, mDNS)
 
 > **Catatan:** UDP dari internet sengaja tidak dideteksi. Balasan UDP dari
@@ -193,7 +194,7 @@ gofmt -l .   # di Windows bisa muncul karena CRLF; Git otomatis mengubahnya ke L
 Ada di [`config.go`](config.go):
 
 - `cacheDB = "127.0.0.1:50051"`: alamat cacheDB
-- `sftpPort = 2025`: port scp yang tidak disimpan
+- `sftpPort`: default `60606` (dapat diubah lewat flag `-sftpport`)
 
 Untuk mendeteksi UDP dari rentang lain (misalnya CGNAT `100.64.0.0/10`),
 tambahkan CIDR-nya ke `cidrs` di [`localip.go`](localip.go).

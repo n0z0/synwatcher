@@ -30,6 +30,6 @@ var (
 	//cachedb
 	cacheDB = "127.0.0.1:50051"
 	//ignore sftp port
-	sftpPort = 2025
+	sftpPort = flag.Int("sftpport", 60606, "Port SFTP honeypot yang diabaikan agar tidak menimpa password")
 	hitungan = make(map[string]int)
 )

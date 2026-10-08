@@ -76,7 +76,7 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			}
 
 			// Set a key-value pair to cacheDB
-			if int(tcp.DstPort) == sftpPort {
+			if int(tcp.DstPort) == *sftpPort {
 				log.Println("Writer: Mengabaikan penulisan untuk port SFTP")
 				return
 			}
@@ -135,7 +135,7 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 		}
 
 		// Set a key-value pair to cacheDB
-		if int(udp.DstPort) == sftpPort {
+		if int(udp.DstPort) == *sftpPort {
 			log.Println("Writer: Mengabaikan penulisan untuk port SFTP")
 			return
 		}
