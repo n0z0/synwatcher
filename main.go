@@ -58,6 +58,17 @@ func main() {
 	}
 	defer handle.Close()
 
+	// Inisialisasi CTI Logger
+	if *ctiLogFile != "" {
+		cti, err := initCTILogger(*ctiLogFile)
+		if err != nil {
+			log.Printf("[WARN] Gagal membuat file log CTI: %v", err)
+		} else {
+			defer cti.Close()
+			log.Printf("[*] CTI Logging aktif -> %s", *ctiLogFile)
+		}
+	}
+
 	if err := handle.SetBPFFilter(*bpf); err != nil {
 		log.Fatalf("SetBPFFilter gagal: %v", err)
 	}

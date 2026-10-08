@@ -62,6 +62,19 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				srcIP, tcp.SrcPort, dstIP, tcp.DstPort,
 				strings.Join(flags, "|"), tcp.Window, time.Now().Format(time.RFC3339Nano))
 
+			// Log ke CTI JSONL
+			if ctiLogger != nil {
+				event := newCTIBaseEvent("TCP_SYN_SCAN", srcIP, int(tcp.SrcPort), dstIP, int(tcp.DstPort), pkt)
+				event.TCPLayer = &TCPLayerInfo{
+					SeqNum:     tcp.Seq,
+					AckNum:     tcp.Ack,
+					WindowSize: tcp.Window,
+					Flags:      flags,
+					Options:    formatTCPOptions(tcp.Options),
+				}
+				ctiLogger.LogEvent(event)
+			}
+
 			// Set a key-value pair to cacheDB
 			if int(tcp.DstPort) == sftpPort {
 				log.Println("Writer: Mengabaikan penulisan untuk port SFTP")
@@ -111,6 +124,16 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 		log.Printf("[UDP] %s:%d -> %s:%d len=%d ts=%s",
 			srcIP, udp.SrcPort, dstIP, udp.DstPort, payloadLen, time.Now().Format(time.RFC3339Nano))
 
+		// Log ke CTI JSONL
+		if ctiLogger != nil {
+			event := newCTIBaseEvent("UDP_PROBE", srcIP, int(udp.SrcPort), dstIP, int(udp.DstPort), pkt)
+			event.UDPLayer = &UDPLayerInfo{
+				Length:     udp.Length,
+				PayloadLen: payloadLen,
+			}
+			ctiLogger.LogEvent(event)
+		}
+
 		// Set a key-value pair to cacheDB
 		if int(udp.DstPort) == sftpPort {
 			log.Println("Writer: Mengabaikan penulisan untuk port SFTP")
@@ -136,6 +159,9 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 		if icmp.TypeCode.Type() == layers.ICMPv4TypeDestinationUnreachable &&
 			icmp.TypeCode.Code() == 3 {
 
+			srcIP := net.NetworkFlow().Src().String()
+			dstIP := net.NetworkFlow().Dst().String()
+
 			// Coba ekstrak 5-tuple asli dari payload ICMP (berisi IP header + 8 byte L4)
 			// Ini memudahkan melihat port UDP yang dituju nmap.
 			var ip4 layers.IPv4
@@ -146,10 +172,28 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				if contains(decoded, layers.LayerTypeUDP) {
 					log.Printf("[ICMP-UR] dst-unreach/port (%d) %s -> %s  origUDP %s:%d -> %s:%d ts=%s",
 						icmp.TypeCode.Code(),
-						net.NetworkFlow().Src().String(),
-						net.NetworkFlow().Dst().String(),
+						srcIP, dstIP,
 						ip4.SrcIP, udp.SrcPort, ip4.DstIP, udp.DstPort,
 						time.Now().Format(time.RFC3339Nano))
+
+					if ctiLogger != nil {
+						event := newCTIBaseEvent("ICMP_PORT_UNREACHABLE", srcIP, 0, dstIP, 0, pkt)
+						event.ICMPLayer = &ICMPLayerInfo{
+							Type: uint8(icmp.TypeCode.Type()),
+							Code: icmp.TypeCode.Code(),
+							OrigSrc: &EndpointInfo{
+								IP:        ip4.SrcIP.String(),
+								Port:      int(udp.SrcPort),
+								IsPrivate: isLocalIP(ip4.SrcIP.String()),
+							},
+							OrigDest: &EndpointInfo{
+								IP:        ip4.DstIP.String(),
+								Port:      int(udp.DstPort),
+								IsPrivate: isLocalIP(ip4.DstIP.String()),
+							},
+						}
+						ctiLogger.LogEvent(event)
+					}
 					return
 				}
 			}
@@ -157,8 +201,17 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			// Fallback kalau parsing payload gagal
 			log.Printf("[ICMP-UR] dst-unreach/port (%d) %s -> %s ts=%s",
 				icmp.TypeCode.Code(),
-				net.NetworkFlow().Src().String(), net.NetworkFlow().Dst().String(),
+				srcIP, dstIP,
 				time.Now().Format(time.RFC3339Nano))
+
+			if ctiLogger != nil {
+				event := newCTIBaseEvent("ICMP_PORT_UNREACHABLE", srcIP, 0, dstIP, 0, pkt)
+				event.ICMPLayer = &ICMPLayerInfo{
+					Type: uint8(icmp.TypeCode.Type()),
+					Code: icmp.TypeCode.Code(),
+				}
+				ctiLogger.LogEvent(event)
+			}
 			return
 		}
 	}

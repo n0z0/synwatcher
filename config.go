@@ -21,6 +21,10 @@ var (
 
 	//bpfstring = "ip and ((tcp and (ip[6:2] & 0x1fff = 0) and (tcp[13] & 0x12 = 0x02)) or udp or (icmp and icmp[0] = 3 and icmp[1] = 3))"
 	bpf = flag.String("bpf", bpfstring, "BPF filter")
+	// CTI Logging
+	ctiLogFile = flag.String("logfile", "synwatcher_cti.jsonl", "Lokasi file log CTI (JSONL format, kosongkan untuk nonaktifkan)")
+	sensorID   = flag.String("sensor", "", "Sensor / Host identifier untuk data CTI (default nama komputer)")
+
 	// cache IP lokal dari device yang dipilih
 	localIPs = map[string]struct{}{}
 	//cachedb

@@ -73,14 +73,51 @@ Get-FileHash .\synwatcher_*_windows_amd64.zip -Algorithm SHA256
 
 ### Opsi command line
 
-| Flag       | Default         | Keterangan                                   |
-|------------|-----------------|----------------------------------------------|
-| `-iface`   | *(auto)*        | Nama device Npcap `\Device\NPF_{GUID}`       |
-| `-bpf`     | *(lihat bawah)* | Filter BPF untuk paket yang ditangkap        |
-| `-snaplen` | `96`            | Jumlah byte yang diambil per paket           |
-| `-promisc` | `true`          | Mode promiscuous                             |
-| `-timeout` | `BlockForever`  | Timeout pembacaan pcap                       |
-| `-version` |                 | Tampilkan versi lalu keluar                  |
+| Flag       | Default                 | Keterangan                                   |
+|------------|-------------------------|----------------------------------------------|
+| `-iface`   | *(auto)*                | Nama device Npcap `\Device\NPF_{GUID}`       |
+| `-logfile` | `synwatcher_cti.jsonl`  | File output log CTI (format JSONL, kosongkan untuk mematikan) |
+| `-sensor`  | *(hostname)*            | Identifier sensor node honeypot              |
+| `-bpf`     | *(lihat bawah)*         | Filter BPF untuk paket yang ditangkap        |
+| `-snaplen` | `96`                    | Jumlah byte yang diambil per paket           |
+| `-promisc` | `true`                  | Mode promiscuous                             |
+| `-timeout` | `BlockForever`          | Timeout pembacaan pcap                       |
+| `-version` |                         | Tampilkan versi lalu keluar                  |
+
+### Data Log untuk Cyber Threat Intelligence (CTI)
+
+Secara default, setiap aktivitas reconnaissance otomatis dicatat ke file **`synwatcher_cti.jsonl`** dalam format JSON Lines yang siap di-ingest ke SIEM, Elastic, Wazuh, atau MISP/OpenCTI.
+
+Data log mencakup informasi pasif fingerprinting dan MITRE ATT&CK:
+- **Identitas**: Timestamp ISO 8601 UTC, Sensor ID, Event Type.
+- **Source & Target**: IP, Port, status `is_private`.
+- **IP Layer Forensics**: TTL (estimasi OS & hop count), IP ID, IP Length.
+- **TCP Layer Forensics**: Window Size, Sequence number, Flags, dan **TCP Options** (urutan MSS, WScale, SACK, TS untuk passive OS / scanner fingerprinting ala *p0f*).
+- **MITRE ATT&CK Mapping**: Tactic `Reconnaissance`, Technique `Network Service Discovery` (`T1046`).
+
+Contoh satu baris log:
+```json
+{
+  "timestamp": "2026-10-08T01:40:15.123456789Z",
+  "sensor_id": "honeypot-node-1",
+  "event_type": "TCP_SYN_SCAN",
+  "source": {"ip": "192.168.1.150", "port": 54321, "is_private": true},
+  "target": {"ip": "192.168.1.10", "port": 22, "is_private": true},
+  "ip_layer": {"version": 4, "ttl": 64, "id": 41235, "protocol": "TCP", "length": 60},
+  "tcp_layer": {
+    "seq": 298123712,
+    "ack": 0,
+    "window_size": 1024,
+    "flags": ["SYN"],
+    "options": ["MSS", "SACKPerm", "TS", "NOP", "WScale"]
+  },
+  "mitre_attack": {
+    "tactic": "Reconnaissance",
+    "technique": "Network Service Discovery",
+    "technique_id": "T1046"
+  }
+}
+```
 
 ### Apa yang terdeteksi
 
@@ -145,6 +182,7 @@ gofmt -l .   # di Windows bisa muncul karena CRLF; Git otomatis mengubahnya ke L
 |------|-----|
 | [`main.go`](main.go) | Entry point: pilih interface, buka pcap, konek cacheDB, loop paket |
 | [`config.go`](config.go) | Flag CLI, filter BPF, alamat cacheDB, port SFTP yang diabaikan |
+| [`cti.go`](cti.go) | Modul CTI Logger (format JSON Lines, passive OS fingerprinting, MITRE ATT&CK) |
 | [`paket.go`](paket.go) | `handlePacket`: logika deteksi TCP / UDP / ICMP |
 | [`localip.go`](localip.go) | Daftar rentang IP privat (`isLocalIP`) |
 | [`helper.go`](helper.go) | Kumpulkan IP lokal milik interface |
