@@ -6,6 +6,7 @@ import (
 	netpkg "net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/gopacket"
@@ -13,6 +14,24 @@ import (
 	"github.com/n0z0/cachedb/cdc"
 	"github.com/n0z0/cachedb/proto/cachepb"
 )
+
+var rdnsCache sync.Map
+
+// getReverseDNS mengambil nama domain PTR dengan in-memory deduplication cache
+func getReverseDNS(ip string) string {
+	if val, ok := rdnsCache.Load(ip); ok {
+		return val.(string)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+	defer cancel()
+	var r netpkg.Resolver
+	var host string
+	if names, err := r.LookupAddr(ctx, ip); err == nil && len(names) > 0 {
+		host = strings.TrimSuffix(names[0], ".")
+	}
+	rdnsCache.Store(ip, host)
+	return host
+}
 
 func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 	net := pkt.NetworkLayer()
@@ -93,14 +112,9 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 						Options:    tcpOptions,
 					}
 
-					// Async reverse DNS resolution non-blocking
+					// Async reverse DNS resolution non-blocking (dengan in-memory deduplication)
 					if !ctiEvent.Source.IsPrivate && srcIP != "127.0.0.1" && srcIP != "::1" {
-						ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
-						var r netpkg.Resolver
-						if names, err := r.LookupAddr(ctx, srcIP); err == nil && len(names) > 0 {
-							ctiEvent.Source.ReverseDNS = strings.TrimSuffix(names[0], ".")
-						}
-						cancel()
+						ctiEvent.Source.ReverseDNS = getReverseDNS(srcIP)
 					}
 
 					ctiLogger.LogEvent(ctiEvent)
@@ -183,12 +197,7 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				}
 
 				if !ctiEvent.Source.IsPrivate && srcIP != "127.0.0.1" && srcIP != "::1" {
-					ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
-					var r netpkg.Resolver
-					if names, err := r.LookupAddr(ctx, srcIP); err == nil && len(names) > 0 {
-						ctiEvent.Source.ReverseDNS = strings.TrimSuffix(names[0], ".")
-					}
-					cancel()
+					ctiEvent.Source.ReverseDNS = getReverseDNS(srcIP)
 				}
 
 				ctiLogger.LogEvent(ctiEvent)
