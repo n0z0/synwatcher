@@ -7,7 +7,23 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
+func recordAndPrintHitungan(srcIP string) {
+	hitunganMu.Lock()
+	hitungan[srcIP]++
+	table := tablewriter.NewWriter(os.Stdout)
+	table.Header([]string{"IP", "Jumlah"})
+	for kata, jumlah := range hitungan {
+		table.Append([]string{kata, fmt.Sprintf("%d", jumlah)})
+	}
+	hitunganMu.Unlock()
+
+	fmt.Println("--- Hasil Hitungan ---")
+	table.Render()
+}
+
 func printHitungan(hitungan map[string]int) {
+	hitunganMu.Lock()
+	defer hitunganMu.Unlock()
 	// Buat table writer
 	table := tablewriter.NewWriter(os.Stdout)
 

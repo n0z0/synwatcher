@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"sync"
 
 	"github.com/google/gopacket/pcap"
 )
@@ -32,4 +33,5 @@ var (
 	//ignore sftp port
 	sftpPort = flag.Int("sftpport", 60606, "Port SFTP honeypot yang diabaikan agar tidak menimpa password")
 	hitungan = make(map[string]int)
+	hitunganMu sync.Mutex
 )

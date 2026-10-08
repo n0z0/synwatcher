@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"runtime"
+	"sync"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
@@ -83,8 +85,33 @@ func main() {
 	}
 	defer conn.Close()
 
+	workerCount := runtime.NumCPU() * 2
+	if workerCount < 4 {
+		workerCount = 4
+	}
+	packetChan := make(chan gopacket.Packet, 4096)
+	var wg sync.WaitGroup
+
+	log.Printf("[*] Worker pool aktif: %d goroutines (Buffer: 4096 paket)", workerCount)
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for pkt := range packetChan {
+				handlePacket(pkt, db)
+			}
+		}(i)
+	}
+
 	src := gopacket.NewPacketSource(handle, handle.LinkType())
 	for pkt := range src.Packets() {
-		handlePacket(pkt, db)
+		select {
+		case packetChan <- pkt:
+		default:
+			// Buffer penuh pada lalu lintas ekstrem, drop untuk mencegah stalling loop pcap
+		}
 	}
+
+	close(packetChan)
+	wg.Wait()
 }

@@ -67,8 +67,11 @@ type MitreAttackInfo struct {
 }
 
 type CTILogger struct {
-	file *os.File
-	mu   sync.Mutex
+	file      *os.File
+	eventChan chan *CTIEvent
+	quit      chan struct{}
+	wg        sync.WaitGroup
+	mu        sync.Mutex
 }
 
 var ctiLogger *CTILogger
@@ -81,29 +84,78 @@ func initCTILogger(path string) (*CTILogger, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gagal membuka log CTI %s: %w", path, err)
 	}
-	ctiLogger = &CTILogger{file: f}
+
+	logger := &CTILogger{
+		file:      f,
+		eventChan: make(chan *CTIEvent, 4096),
+		quit:      make(chan struct{}),
+	}
+
+	logger.wg.Add(1)
+	go func() {
+		defer logger.wg.Done()
+		for {
+			select {
+			case event, ok := <-logger.eventChan:
+				if !ok {
+					return
+				}
+				data, err := json.Marshal(event)
+				if err != nil {
+					log.Printf("[CTI] Gagal serialize JSON event: %v", err)
+					continue
+				}
+				logger.mu.Lock()
+				logger.file.Write(append(data, '\n'))
+				logger.mu.Unlock()
+			case <-logger.quit:
+				for {
+					select {
+					case event := <-logger.eventChan:
+						data, err := json.Marshal(event)
+						if err == nil {
+							logger.mu.Lock()
+							logger.file.Write(append(data, '\n'))
+							logger.mu.Unlock()
+						}
+					default:
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	ctiLogger = logger
 	return ctiLogger, nil
 }
 
 func (l *CTILogger) Close() {
-	if l != nil && l.file != nil {
-		l.file.Close()
+	if l != nil {
+		close(l.quit)
+		l.wg.Wait()
+		if l.file != nil {
+			l.file.Close()
+		}
 	}
 }
 
 func (l *CTILogger) LogEvent(event *CTIEvent) {
-	if l == nil || l.file == nil {
+	if l == nil {
 		return
 	}
-	data, err := json.Marshal(event)
-	if err != nil {
-		log.Printf("[CTI] Gagal serialize JSON event: %v", err)
-		return
+	select {
+	case l.eventChan <- event:
+	default:
+		go func() {
+			data, err := json.Marshal(event)
+			if err == nil && l.file != nil {
+				l.mu.Lock()
+				defer l.mu.Unlock()
+				l.file.Write(append(data, '\n'))
+			}
+		}()
 	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.file.Write(append(data, '\n'))
 }
 
 // Helper untuk mengekstrak layer IP (IPv4 / IPv6)
