@@ -212,14 +212,18 @@ Integritas semua file dapat diverifikasi dengan `checksums.txt`.
 Secara default, setiap aktivitas reconnaissance otomatis dicatat ke file **`synwatcher_cti.jsonl`** dalam format JSON Lines yang siap di-ingest ke SIEM, Elastic, Wazuh, atau MISP/OpenCTI.
 
 Data log telah memenuhi standar **Advanced Cyber Threat Intelligence (SOC-Grade)** mencakup:
-- **Identitas & Perilaku**: Timestamp ISO 8601 UTC, Sensor ID, Event Type, **`scan_behavior`** (`SINGLE_PORT_KNOCK` vs `PORT_SWEEP_SCAN`), dan **`scan_hit_count`**.
+- **TCP SYN Fingerprint & Hash**: **`syn_fingerprint`** (`Ver:TTL:WS:Flags:OptionsOrder`) dan **`syn_hash`** (MD5 hash 32-karakter unik) berfungsi sebagai IOC permanen mirip JA3/HASSH untuk melacak tools dan signature penyerang meskipun IP berubah.
+- **Identifikasi Sasaran & Niat Ancaman**: **`target_service`** (SSH, HTTP, SMB/RPC, RDP, MySQL, Redis, dll.) dan **`intent_category`** (`LATERAL_MOVEMENT_PROBE`, `REMOTE_DESKTOP_EXPLOITATION_PROBE`, `DATABASE_DISCOVERY`, `WEB_RECONNAISSANCE`).
+- **Dynamic Risk Scoring & Severity**: **`risk_score`** (skor 0 – 100 terkalibrasi otomatis) dan **`severity`** (`INFO`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
+- **Scan Velocity & Profiling Timing**: **`scan_velocity`** mendeteksi ritme serangan (`BURST_AUTOMATED_SCAN` [<200ms], `STEADY_PACE_SCAN` [200ms–2s], `SLOW_AND_LOW_STEALTH` [evasive probe >2s], atau `INITIAL_PROBE`).
 - **Passive OS Fingerprinting**: **`estimated_os`** (Linux/Android/macOS, Windows, Network Appliance) serta **`estimated_hops`** berdasarkan initial TTL dan TCP stack.
 - **Scanner Tool Footprinting**: **`scanner_tool`** (mendeteksi *Nmap Stealth SYN Scan*, *Masscan*, *ZMap*, atau *Standard OS Socket / PowerShell / Browser*).
+- **Identitas & Perilaku**: Timestamp ISO 8601 UTC, Sensor ID, Event Type, **`scan_behavior`** (`SINGLE_PORT_KNOCK` vs `PORT_SWEEP_SCAN`), dan **`scan_hit_count`**.
 - **Source & Target**: IP, Port, status `is_private`.
-- **IP Layer Forensics**: TTL, IP ID, IP Length, Protocol.
-- **TCP Layer Forensics**: Window Size, Sequence number, Flags, dan **TCP Options** (`MSS`, `WScale`, `SACKPerm`, `TS`, `NOP`).
+- **IP & TCP Layer Forensics**: TTL, IP ID, IP Length, Protocol, Window Size, Sequence number, Flags, dan **TCP Options** (`MSS`, `WScale`, `SACKPerm`, `TS`, `NOP`).
 - **MITRE ATT&CK Mapping**: Tactic `Reconnaissance`, Technique `Network Service Discovery` (`T1046`) atau `Active Scanning: Port Scanning` (`T1595.002`).
-- **Inter-Service CacheDB Threat Intel**: Selain menyimpan password SFTP, synwatcher otomatis menginjeksi metadata pelaku (`actor:os:<IP>`, `actor:scanner:<IP>`, `actor:scan_hits:<IP>`) ke CacheDB sehingga server `scp` dan dashboard SIEM langsung mengenali identitas penyerang saat login!
+- **Arsitektur Asinkron Go Routine**: Pembacaan paket dan penyimpanan knock password berjalan di jalur cepat mikrodetik, sedangkan pengayaan CTI, kalkulasi fingerprint hash, logging JSONL, dan sinkronisasi metadata CacheDB didelegasikan secara mandiri ke **Go Routine (`go func`)** non-blocking sehingga tidak pernah terjadi packet drop saat dihantam ribuan probe nmap per detik.
+- **Inter-Service CacheDB Threat Intel**: Selain menyimpan password SFTP, synwatcher otomatis menginjeksi metadata pelaku (`actor:syn_hash:<IP>`, `actor:risk:<IP>`, `actor:severity:<IP>`, `actor:target_service:<IP>`, `actor:intent:<IP>`, `actor:velocity:<IP>`, `actor:os:<IP>`, `actor:scanner:<IP>`, `actor:scan_hits:<IP>`) ke CacheDB secara instan.
 
 Contoh satu baris log SOC-Grade:
 ```json
@@ -229,11 +233,18 @@ Contoh satu baris log SOC-Grade:
   "event_type": "TCP_SYN_SCAN",
   "scan_behavior": "PORT_SWEEP_SCAN",
   "scan_hit_count": 8,
+  "scan_velocity": "BURST_AUTOMATED_SCAN",
   "estimated_os": "Linux / Android / macOS",
   "estimated_hops": 0,
   "scanner_tool": "Nmap (Stealth SYN Scan)",
+  "syn_fingerprint": "4:64:1024:SYN:MSS,SACKPerm,TS,NOP,WScale",
+  "syn_hash": "a8f5c389e63470123efb69201a0912cb",
+  "target_service": "RDP",
+  "intent_category": "REMOTE_DESKTOP_EXPLOITATION_PROBE",
+  "risk_score": 90,
+  "severity": "CRITICAL",
   "source": {"ip": "192.168.1.150", "port": 54321, "is_private": true},
-  "target": {"ip": "192.168.1.10", "port": 8080, "is_private": true},
+  "target": {"ip": "192.168.1.10", "port": 3389, "is_private": true},
   "ip_layer": {"version": 4, "ttl": 64, "id": 41235, "protocol": "TCP", "length": 60},
   "tcp_layer": {
     "seq": 298123712,

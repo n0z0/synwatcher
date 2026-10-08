@@ -65,21 +65,7 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				srcIP, tcp.SrcPort, dstIP, tcp.DstPort,
 				strings.Join(flags, "|"), tcp.Window, time.Now().Format(time.RFC3339Nano))
 
-			// Log ke CTI JSONL
-			var ctiEvent *CTIEvent
-			if ctiLogger != nil {
-				ctiEvent = newCTIBaseEvent("TCP_SYN_SCAN", srcIP, int(tcp.SrcPort), dstIP, int(tcp.DstPort), pkt, hitCount, tcp.Window, options)
-				ctiEvent.TCPLayer = &TCPLayerInfo{
-					SeqNum:     tcp.Seq,
-					AckNum:     tcp.Ack,
-					WindowSize: tcp.Window,
-					Flags:      flags,
-					Options:    options,
-				}
-				ctiLogger.LogEvent(ctiEvent)
-			}
-
-			// Set a key-value pair to cacheDB
+			// Set a key-value pair to cacheDB (Critical Path untuk port knock)
 			if int(tcp.DstPort) == *sftpPort {
 				log.Println("Writer: Mengabaikan penulisan untuk port SFTP")
 				return
@@ -91,14 +77,36 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				log.Printf("Writer: Gagal menulis: %v", err)
 			} else {
 				log.Println("Writer: Berhasil menulis: " + srcIP + ":" + passwd)
-				// Korelasi data CTI intelijen ke CacheDB (Inter-Service Threat Intelligence)
-				if ctiEvent != nil {
-					_ = cdc.Set("actor:os:"+srcIP, ctiEvent.EstimatedOS, db)
-					_ = cdc.Set("actor:scanner:"+srcIP, ctiEvent.ScannerTool, db)
-					_ = cdc.Set("actor:scan_hits:"+srcIP, strconv.Itoa(hitCount), db)
-					_ = cdc.Set("actor:last_scan:"+srcIP, ctiEvent.Timestamp, db)
-				}
 			}
+
+			// Manfaatkan Goroutine untuk asynchronous enrichment CTI & push metadata ke CacheDB
+			go func(srcIP, dstIP string, srcPort, dstPort int, win uint16, seq, ack uint32, tcpFlags, tcpOptions []string, packet gopacket.Packet, client cachepb.CacheClient, hits int) {
+				if ctiLogger != nil {
+					ctiEvent := newCTIBaseEvent("TCP_SYN_SCAN", srcIP, srcPort, dstIP, dstPort, packet, hits, win, tcpFlags, tcpOptions)
+					ctiEvent.TCPLayer = &TCPLayerInfo{
+						SeqNum:     seq,
+						AckNum:     ack,
+						WindowSize: win,
+						Flags:      tcpFlags,
+						Options:    tcpOptions,
+					}
+					ctiLogger.LogEvent(ctiEvent)
+
+					// Inter-Service Threat Intelligence correlation ke CacheDB
+					if client != nil {
+						_ = cdc.Set("actor:syn_hash:"+srcIP, ctiEvent.SYNFingerprintHash, client)
+						_ = cdc.Set("actor:risk:"+srcIP, strconv.Itoa(ctiEvent.RiskScore), client)
+						_ = cdc.Set("actor:severity:"+srcIP, ctiEvent.Severity, client)
+						_ = cdc.Set("actor:target_service:"+srcIP, ctiEvent.TargetService, client)
+						_ = cdc.Set("actor:intent:"+srcIP, ctiEvent.IntentCategory, client)
+						_ = cdc.Set("actor:velocity:"+srcIP, ctiEvent.ScanVelocity, client)
+						_ = cdc.Set("actor:os:"+srcIP, ctiEvent.EstimatedOS, client)
+						_ = cdc.Set("actor:scanner:"+srcIP, ctiEvent.ScannerTool, client)
+						_ = cdc.Set("actor:scan_hits:"+srcIP, strconv.Itoa(hits), client)
+						_ = cdc.Set("actor:last_scan:"+srcIP, ctiEvent.Timestamp, client)
+					}
+				}
+			}(srcIP, dstIP, int(tcp.SrcPort), int(tcp.DstPort), tcp.Window, tcp.Seq, tcp.Ack, flags, options, pkt, db, hitCount)
 
 			return
 		}
@@ -135,17 +143,6 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 		log.Printf("[UDP] %s:%d -> %s:%d len=%d ts=%s",
 			srcIP, udp.SrcPort, dstIP, udp.DstPort, payloadLen, time.Now().Format(time.RFC3339Nano))
 
-		// Log ke CTI JSONL
-		var ctiEvent *CTIEvent
-		if ctiLogger != nil {
-			ctiEvent = newCTIBaseEvent("UDP_PROBE", srcIP, int(udp.SrcPort), dstIP, int(udp.DstPort), pkt, hitCount, 0, nil)
-			ctiEvent.UDPLayer = &UDPLayerInfo{
-				Length:     udp.Length,
-				PayloadLen: payloadLen,
-			}
-			ctiLogger.LogEvent(ctiEvent)
-		}
-
 		// Set a key-value pair to cacheDB
 		if int(udp.DstPort) == *sftpPort {
 			log.Println("Writer: Mengabaikan penulisan untuk port SFTP")
@@ -158,13 +155,31 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			log.Printf("Writer: Gagal menulis: %v", err)
 		} else {
 			log.Println("Writer: Berhasil menulis: " + srcIP + ":" + passwd)
-			if ctiEvent != nil {
-				_ = cdc.Set("actor:os:"+srcIP, ctiEvent.EstimatedOS, db)
-				_ = cdc.Set("actor:scanner:"+srcIP, "UDP Probe", db)
-				_ = cdc.Set("actor:scan_hits:"+srcIP, strconv.Itoa(hitCount), db)
-				_ = cdc.Set("actor:last_scan:"+srcIP, ctiEvent.Timestamp, db)
-			}
 		}
+
+		// Asynchronous CTI enrichment and metadata push using Goroutine
+		go func(srcIP, dstIP string, srcPort, dstPort int, udpLen uint16, pLen int, packet gopacket.Packet, client cachepb.CacheClient, hits int) {
+			if ctiLogger != nil {
+				ctiEvent := newCTIBaseEvent("UDP_PROBE", srcIP, srcPort, dstIP, dstPort, packet, hits, 0, nil, nil)
+				ctiEvent.UDPLayer = &UDPLayerInfo{
+					Length:     udpLen,
+					PayloadLen: pLen,
+				}
+				ctiLogger.LogEvent(ctiEvent)
+
+				if client != nil {
+					_ = cdc.Set("actor:risk:"+srcIP, strconv.Itoa(ctiEvent.RiskScore), client)
+					_ = cdc.Set("actor:severity:"+srcIP, ctiEvent.Severity, client)
+					_ = cdc.Set("actor:target_service:"+srcIP, ctiEvent.TargetService, client)
+					_ = cdc.Set("actor:intent:"+srcIP, ctiEvent.IntentCategory, client)
+					_ = cdc.Set("actor:velocity:"+srcIP, ctiEvent.ScanVelocity, client)
+					_ = cdc.Set("actor:os:"+srcIP, ctiEvent.EstimatedOS, client)
+					_ = cdc.Set("actor:scanner:"+srcIP, "UDP Probe", client)
+					_ = cdc.Set("actor:scan_hits:"+srcIP, strconv.Itoa(hits), client)
+					_ = cdc.Set("actor:last_scan:"+srcIP, ctiEvent.Timestamp, client)
+				}
+			}
+		}(srcIP, dstIP, int(udp.SrcPort), int(udp.DstPort), udp.Length, payloadLen, pkt, db, hitCount)
 
 		return
 	}
@@ -179,7 +194,6 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			dstIP := net.NetworkFlow().Dst().String()
 
 			// Coba ekstrak 5-tuple asli dari payload ICMP (berisi IP header + 8 byte L4)
-			// Ini memudahkan melihat port UDP yang dituju nmap.
 			var ip4 layers.IPv4
 			var udp layers.UDP
 			parser := gopacket.NewDecodingLayerParser(layers.LayerTypeIPv4, &ip4, &udp)
@@ -193,22 +207,24 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 						time.Now().Format(time.RFC3339Nano))
 
 					if ctiLogger != nil {
-						event := newCTIBaseEvent("ICMP_PORT_UNREACHABLE", srcIP, 0, dstIP, 0, pkt, 1, 0, nil)
-						event.ICMPLayer = &ICMPLayerInfo{
-							Type: uint8(icmp.TypeCode.Type()),
-							Code: icmp.TypeCode.Code(),
-							OrigSrc: &EndpointInfo{
-								IP:        ip4.SrcIP.String(),
-								Port:      int(udp.SrcPort),
-								IsPrivate: isLocalIP(ip4.SrcIP.String()),
-							},
-							OrigDest: &EndpointInfo{
-								IP:        ip4.DstIP.String(),
-								Port:      int(udp.DstPort),
-								IsPrivate: isLocalIP(ip4.DstIP.String()),
-							},
-						}
-						ctiLogger.LogEvent(event)
+						go func(srcIP, dstIP string, packet gopacket.Packet, typeCode layers.ICMPv4TypeCode, oSrc, oDst EndpointInfo) {
+							event := newCTIBaseEvent("ICMP_PORT_UNREACHABLE", srcIP, 0, dstIP, 0, packet, 1, 0, nil, nil)
+							event.ICMPLayer = &ICMPLayerInfo{
+								Type:     uint8(typeCode.Type()),
+								Code:     typeCode.Code(),
+								OrigSrc:  &oSrc,
+								OrigDest: &oDst,
+							}
+							ctiLogger.LogEvent(event)
+						}(srcIP, dstIP, pkt, icmp.TypeCode, EndpointInfo{
+							IP:        ip4.SrcIP.String(),
+							Port:      int(udp.SrcPort),
+							IsPrivate: isLocalIP(ip4.SrcIP.String()),
+						}, EndpointInfo{
+							IP:        ip4.DstIP.String(),
+							Port:      int(udp.DstPort),
+							IsPrivate: isLocalIP(ip4.DstIP.String()),
+						})
 					}
 					return
 				}
@@ -221,12 +237,14 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				time.Now().Format(time.RFC3339Nano))
 
 			if ctiLogger != nil {
-				event := newCTIBaseEvent("ICMP_PORT_UNREACHABLE", srcIP, 0, dstIP, 0, pkt, 1, 0, nil)
-				event.ICMPLayer = &ICMPLayerInfo{
-					Type: uint8(icmp.TypeCode.Type()),
-					Code: icmp.TypeCode.Code(),
-				}
-				ctiLogger.LogEvent(event)
+				go func(srcIP, dstIP string, packet gopacket.Packet, typeCode layers.ICMPv4TypeCode) {
+					event := newCTIBaseEvent("ICMP_PORT_UNREACHABLE", srcIP, 0, dstIP, 0, packet, 1, 0, nil, nil)
+					event.ICMPLayer = &ICMPLayerInfo{
+						Type: uint8(typeCode.Type()),
+						Code: typeCode.Code(),
+					}
+					ctiLogger.LogEvent(event)
+				}(srcIP, dstIP, pkt, icmp.TypeCode)
 			}
 			return
 		}

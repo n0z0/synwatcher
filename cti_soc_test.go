@@ -71,3 +71,66 @@ func TestIdentifyScannerTool(t *testing.T) {
 		})
 	}
 }
+
+func TestCalculateSYNFingerprint(t *testing.T) {
+	fp, hash := CalculateSYNFingerprint(4, 64, 1024, []string{"SYN"}, []string{"MSS", "SACKPerm", "TS", "NOP", "WScale"})
+	expectedFP := "4:64:1024:SYN:MSS,SACKPerm,TS,NOP,WScale"
+	if fp != expectedFP {
+		t.Errorf("Expected FP %q, got %q", expectedFP, fp)
+	}
+	if len(hash) != 32 {
+		t.Errorf("Expected 32-character MD5 hash, got %d chars (%q)", len(hash), hash)
+	}
+
+	// Empty options fallback
+	fpEmpty, hashEmpty := CalculateSYNFingerprint(4, 128, 65535, []string{"SYN"}, nil)
+	expectedEmptyFP := "4:128:65535:SYN:none"
+	if fpEmpty != expectedEmptyFP {
+		t.Errorf("Expected FP %q, got %q", expectedEmptyFP, fpEmpty)
+	}
+	if len(hashEmpty) != 32 {
+		t.Errorf("Expected 32-character MD5 hash, got %d chars (%q)", len(hashEmpty), hashEmpty)
+	}
+}
+
+func TestCategorizeTargetService(t *testing.T) {
+	tests := []struct {
+		port           int
+		expectedSvc    string
+		expectedIntent string
+	}{
+		{22, "SSH", "REMOTE_ACCESS_PROBE"},
+		{23, "Telnet", "INSECURE_REMOTE_ACCESS_PROBE"},
+		{80, "HTTP", "WEB_RECONNAISSANCE"},
+		{443, "HTTPS", "WEB_RECONNAISSANCE"},
+		{445, "SMB/RPC", "LATERAL_MOVEMENT_PROBE"},
+		{3389, "RDP", "REMOTE_DESKTOP_EXPLOITATION_PROBE"},
+		{3306, "MySQL", "DATABASE_DISCOVERY"},
+		{6379, "Redis", "DATABASE_DISCOVERY"},
+		{9999, "Port-9999", "UNKNOWN_SERVICE_SCAN"},
+	}
+
+	for _, tc := range tests {
+		svc, intent := CategorizeTargetService(tc.port)
+		if svc != tc.expectedSvc {
+			t.Errorf("Port %d: expected service %q, got %q", tc.port, tc.expectedSvc, svc)
+		}
+		if intent != tc.expectedIntent {
+			t.Errorf("Port %d: expected intent %q, got %q", tc.port, tc.expectedIntent, intent)
+		}
+	}
+}
+
+func TestCalculateRiskScore(t *testing.T) {
+	// Critical threat: Nmap scan + RDP + sweep scan + burst
+	scoreCrit, sevCrit := CalculateRiskScore("Nmap (Stealth SYN Scan)", "REMOTE_DESKTOP_EXPLOITATION_PROBE", "PORT_SWEEP_SCAN", "BURST_AUTOMATED_SCAN", 15)
+	if scoreCrit < 85 || sevCrit != "CRITICAL" {
+		t.Errorf("Expected CRITICAL severity (>=85), got score %d severity %q", scoreCrit, sevCrit)
+	}
+
+	// Low threat: Standard OS socket single knock to unknown port
+	scoreLow, sevLow := CalculateRiskScore("Standard OS Socket (PowerShell/Browser/Socket)", "UNKNOWN_SERVICE_SCAN", "SINGLE_PORT_KNOCK", "INITIAL_PROBE", 1)
+	if scoreLow > 40 || (sevLow != "LOW" && sevLow != "INFO") {
+		t.Errorf("Expected LOW or INFO severity, got score %d severity %q", scoreLow, sevLow)
+	}
+}
