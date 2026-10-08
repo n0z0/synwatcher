@@ -50,16 +50,17 @@ curl -fsSL https://raw.githubusercontent.com/n0z0/synwatcher/main/install.sh | b
 
 ---
 
-### Instalasi Manual (Unduh Zip/Tar.gz)
+### Unduh Manual (Binary Langsung atau Bundel)
 
-Unduh paket dari halaman [Releases](https://github.com/n0z0/synwatcher/releases/latest), lalu ekstrak:
-- **Windows:** `synwatcher_vX.Y.Z_windows_amd64.zip`
-- **Linux:** `synwatcher_vX.Y.Z_linux_amd64.tar.gz`
+Tersedia di halaman [Releases](https://github.com/n0z0/synwatcher/releases/latest):
+- **Binary Langsung (siap pakai tanpa ekstrak):**
+  - Windows: `synwatcher_windows_amd64.exe`
+  - Linux: `synwatcher_linux_amd64`
+- **Bundel Arsip (berisi dokumen + script):**
+  - Windows: `synwatcher_vX.Y.Z_windows_amd64.zip`
+  - Linux: `synwatcher_vX.Y.Z_linux_amd64.tar.gz`
 
-Untuk memeriksa integritas file, cocokkan hash-nya dengan `checksums.txt`:
-```powershell
-Get-FileHash .\synwatcher_*_windows_amd64.zip -Algorithm SHA256
-```
+Integritas semua file dapat diverifikasi dengan `checksums.txt`.
 
 ### Menjalankan
 

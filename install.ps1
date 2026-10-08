@@ -52,39 +52,46 @@ if (Test-Path $CurrentExe) {
     } catch {}
 }
 
-# 3. Download asset
-$ZipName = "synwatcher_" + $TargetTag + "_windows_amd64.zip"
-$DownloadUrl = "https://github.com/$Repo/releases/download/$TargetTag/$ZipName"
-$TempDir = Join-Path $env:TEMP ("synwatcher_install_" + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
-$ZipPath = Join-Path $TempDir $ZipName
-
-Write-Host "[*] Mengunduh $DownloadUrl ..." -ForegroundColor Yellow
-try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $DownloadUrl -OutFile $ZipPath -UseBasicParsing
-} catch {
-    Write-Error "Gagal mengunduh $DownloadUrl. Error: $_"
-}
-
-# 4. Ekstrak dan pasang
-Write-Host "[*] Mengekstrak file..." -ForegroundColor Yellow
-Expand-Archive -Path $ZipPath -DestinationPath $TempDir -Force
-
-$ExtractedFolder = Join-Path $TempDir ("synwatcher_" + $TargetTag + "_windows_amd64")
-if (-not (Test-Path $ExtractedFolder)) {
-    $ExtractedFolder = $TempDir
-}
-
+# 3. Download dan pasang binary langsung
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-Write-Host "[*] Memasang ke $InstallDir ..." -ForegroundColor Yellow
-Copy-Item -Path (Join-Path $ExtractedFolder "*") -Destination $InstallDir -Recurse -Force
+$DirectExeUrl = "https://github.com/$Repo/releases/download/$TargetTag/synwatcher_windows_amd64.exe"
+$TargetExePath = Join-Path $InstallDir "synwatcher.exe"
+$TempExePath = Join-Path $InstallDir ("synwatcher_new_" + [Guid]::NewGuid().ToString('N') + ".exe")
 
-# Bersihkan temp
-Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host "[*] Mengunduh binary langsung dari $DirectExeUrl ..." -ForegroundColor Yellow
+$Downloaded = $false
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $DirectExeUrl -OutFile $TempExePath -UseBasicParsing
+    Move-Item -Path $TempExePath -Destination $TargetExePath -Force
+    $Downloaded = $true
+} catch {
+    # Fallback ke format zip jika versi rilis lama belum memiliki binary telanjang
+    Write-Host "[*] Binary langsung tidak ditemukan, mencoba unduh dari zip bundel..." -ForegroundColor Gray
+    Remove-Item -Path $TempExePath -Force -ErrorAction SilentlyContinue
+
+    $ZipName = "synwatcher_" + $TargetTag + "_windows_amd64.zip"
+    $ZipUrl = "https://github.com/$Repo/releases/download/$TargetTag/$ZipName"
+    $TempZip = Join-Path $env:TEMP $ZipName
+    $TempExtract = Join-Path $env:TEMP ("synwatcher_ext_" + [Guid]::NewGuid().ToString('N'))
+
+    Invoke-WebRequest -Uri $ZipUrl -OutFile $TempZip -UseBasicParsing
+    Expand-Archive -Path $TempZip -DestinationPath $TempExtract -Force
+    $ExtractedExe = Get-ChildItem -Path $TempExtract -Filter "synwatcher.exe" -Recurse | Select-Object -First 1
+    if ($ExtractedExe) {
+        Copy-Item -Path $ExtractedExe.FullName -Destination $TargetExePath -Force
+        $Downloaded = $true
+    }
+    Remove-Item -Path $TempZip -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $TempExtract -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+if (-not $Downloaded) {
+    Write-Error "Gagal memasang binary synwatcher."
+}
 
 # 5. Daftarkan ke PATH User
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")

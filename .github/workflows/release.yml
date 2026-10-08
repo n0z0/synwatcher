@@ -81,13 +81,15 @@ jobs:
           CGO_ENABLED: "0" # gopacket/pcap di Windows memuat wpcap.dll saat runtime, tanpa cgo
         run: |
           mkdir -p dist
-          # Hanya amd64: gopacket v1.1.19 tidak menyediakan definisi pcap untuk windows/arm64
           for ARCH in amd64; do
             NAME="synwatcher_${VERSION}_windows_${ARCH}"
             mkdir -p "build/${NAME}"
             GOOS=windows GOARCH=${ARCH} go build -trimpath \
               -ldflags "-s -w -X main.version=${VERSION}" \
               -o "build/${NAME}/synwatcher.exe" .
+            # Salin binary telanjang langsung ke dist
+            cp "build/${NAME}/synwatcher.exe" "dist/synwatcher_windows_${ARCH}.exe"
+            # Buat paket zip bundel
             cp README.md LICENSE getnet.ps1 install.ps1 "build/${NAME}/"
             (cd build && zip -qr "../dist/${NAME}.zip" "${NAME}")
           done
@@ -102,9 +104,12 @@ jobs:
           GOOS=linux GOARCH=amd64 go build -trimpath \
             -ldflags "-s -w -X main.version=${VERSION}" \
             -o "build/${NAME}/synwatcher" .
+          # Salin binary telanjang langsung ke dist
+          cp "build/${NAME}/synwatcher" "dist/synwatcher_linux_amd64"
+          # Buat paket tar.gz bundel
           cp README.md LICENSE install.sh "build/${NAME}/"
           tar -czf "dist/${NAME}.tar.gz" -C build "${NAME}"
-          (cd dist && sha256sum *.zip *.tar.gz > checksums.txt)
+          (cd dist && sha256sum * > checksums.txt)
           ls -l dist
 
       - name: Buat tag (push ke main / tombol)
@@ -124,9 +129,7 @@ jobs:
           name: ${{ steps.ver.outputs.version }}
           generate_release_notes: true
           files: |
-            dist/*.zip
-            dist/*.tar.gz
-            dist/checksums.txt
+            dist/*
           body: |
             ## Cara pakai
             1. Install [Npcap](https://npcap.com/#download) (centang *WinPcap API-compatible mode*).

@@ -66,25 +66,30 @@ if [ -n "${EXISTING_BIN}" ]; then
   fi
 fi
 
-# 4. Unduh Archive Release
-TAR_NAME="synwatcher_${TARGET_TAG}_linux_${TARGET_ARCH}.tar.gz"
-DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${TARGET_TAG}/${TAR_NAME}"
+# 4. Unduh Binary Langsung
+DIRECT_BIN_NAME="synwatcher_linux_${TARGET_ARCH}"
+DIRECT_URL="https://github.com/${REPO}/releases/download/${TARGET_TAG}/${DIRECT_BIN_NAME}"
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TEMP_DIR}"' EXIT
 
-echo "[*] Mengunduh ${DOWNLOAD_URL}..."
-if ! curl -fsSL "${DOWNLOAD_URL}" -o "${TEMP_DIR}/${TAR_NAME}"; then
-  echo "[!] Gagal mengunduh binary rilis Linux."
-  echo "    Catatan: Jika binary Linux belum dirilis untuk tag ini, jalankan instalasi via go build."
-  exit 1
-fi
+EXTRACTED_BIN="${TEMP_DIR}/synwatcher"
 
-echo "[*] Mengekstrak..."
-tar -xzf "${TEMP_DIR}/${TAR_NAME}" -C "${TEMP_DIR}"
-
-EXTRACTED_BIN="${TEMP_DIR}/synwatcher_${TARGET_TAG}_linux_${TARGET_ARCH}/synwatcher"
-if [ ! -f "${EXTRACTED_BIN}" ]; then
-  EXTRACTED_BIN="${TEMP_DIR}/synwatcher"
+echo "[*] Mengunduh binary langsung dari ${DIRECT_URL}..."
+if curl -fsSL "${DIRECT_URL}" -o "${EXTRACTED_BIN}"; then
+  echo "[*] Binary langsung berhasil diunduh."
+else
+  echo "[*] Binary langsung tidak ditemukan, mencoba tar.gz bundel..."
+  TAR_NAME="synwatcher_${TARGET_TAG}_linux_${TARGET_ARCH}.tar.gz"
+  TAR_URL="https://github.com/${REPO}/releases/download/${TARGET_TAG}/${TAR_NAME}"
+  if curl -fsSL "${TAR_URL}" -o "${TEMP_DIR}/${TAR_NAME}"; then
+    tar -xzf "${TEMP_DIR}/${TAR_NAME}" -C "${TEMP_DIR}"
+    if [ -f "${TEMP_DIR}/synwatcher_${TARGET_TAG}_linux_${TARGET_ARCH}/synwatcher" ]; then
+      EXTRACTED_BIN="${TEMP_DIR}/synwatcher_${TARGET_TAG}_linux_${TARGET_ARCH}/synwatcher"
+    fi
+  else
+    echo "[!] Gagal mengunduh binary rilis Linux."
+    exit 1
+  fi
 fi
 
 # 5. Pasang Binary
