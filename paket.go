@@ -29,6 +29,11 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			if _, ok := localIPs[srcIP]; ok {
 				return
 			}
+			// Hanya SYN yang ditujukan ke mesin ini (abaikan trafik host lain
+			// yang ikut tertangkap karena mode promiscuous)
+			if _, ok := localIPs[dstIP]; !ok {
+				return
+			}
 			if srcIP == "127.0.0.1" || srcIP == "::1" {
 				return
 			}

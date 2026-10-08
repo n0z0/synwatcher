@@ -10,9 +10,19 @@ import (
 	"github.com/n0z0/cachedb/cdc"
 )
 
+// version diisi saat build release: -ldflags "-X main.version=v1.2.3"
+var version = "dev"
+
+var showVersion = flag.Bool("version", false, "Tampilkan versi lalu keluar")
+
 func main() {
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("synwatcher", version)
+		return
+	}
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	log.Printf("[*] synwatcher %s", version)
 
 	dev := *iface
 	if dev == "" {
@@ -39,8 +49,8 @@ func main() {
 	fmt.Printf("dev: %v\n", dev)
 
 	// Kumpulkan IP lokal untuk device NPF yang dipilih
-	loadLocalIPsFor(*iface)
-	log.Printf("[*] Local IPs on %s: %v", *iface, keys(localIPs))
+	loadLocalIPsFor(dev)
+	log.Printf("[*] Local IPs on %s: %v", dev, keys(localIPs))
 
 	handle, err := pcap.OpenLive(dev, int32(*snaplen), *promisc, *timeout)
 	if err != nil {
