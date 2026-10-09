@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"fmt"
 	netpkg "net"
 	"strconv"
 	"strings"
@@ -79,25 +79,28 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 				flags = append(flags, "URG")
 			}
 
-			hitCount := recordHitAndGetCount(srcIP)
 			options := formatTCPOptions(tcp.Options)
-
-			log.Printf("[SYN] %s:%d -> %s:%d flags=%s win=%d ts=%s",
-				srcIP, tcp.SrcPort, dstIP, tcp.DstPort,
-				strings.Join(flags, "|"), tcp.Window, time.Now().Format(time.RFC3339Nano))
+			nowStr := time.Now().Format("15:04:05.000")
 
 			// Set a key-value pair to cacheDB (Critical Path untuk port knock)
 			if int(tcp.DstPort) == *sftpPort {
-				log.Println("Writer: Mengabaikan penulisan untuk port SFTP")
+				recordHitWithStatus(srcIP, fmt.Sprintf("Port %d (SFTP Ignored)", tcp.DstPort))
+				addActivityLog(fmt.Sprintf("[%s] [SYN] %s:%d -> :%d (%s) | Writer: Abaikan port SFTP (%d)",
+					nowStr, srcIP, tcp.SrcPort, tcp.DstPort, strings.Join(flags, "|"), *sftpPort))
 				return
 			}
-			log.Println("Writer: Menulis data...")
+
 			passwd := strconv.Itoa(int(tcp.DstPort))
 			err := cdc.Set(srcIP, passwd, db)
+			var hitCount int
 			if err != nil {
-				log.Printf("Writer: Gagal menulis: %v", err)
+				hitCount = recordHitWithStatus(srcIP, fmt.Sprintf("Port %d (Knock Error)", tcp.DstPort))
+				addActivityLog(fmt.Sprintf("[%s] [SYN] %s:%d -> :%d (%s) | Writer ERROR: %v",
+					nowStr, srcIP, tcp.SrcPort, tcp.DstPort, strings.Join(flags, "|"), err))
 			} else {
-				log.Println("Writer: Berhasil menulis: " + srcIP + ":" + passwd)
+				hitCount = recordHitWithStatus(srcIP, fmt.Sprintf("Knock Active (Port %s)", passwd))
+				addActivityLog(fmt.Sprintf("[%s] [SYN] %s:%d -> :%d (%s) | Writer: Set knock passwd=%s",
+					nowStr, srcIP, tcp.SrcPort, tcp.DstPort, strings.Join(flags, "|"), passwd))
 			}
 
 			// Manfaatkan Goroutine untuk asynchronous enrichment CTI & push metadata ke CacheDB
@@ -168,23 +171,27 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			payloadLen = 0
 		}
 
-		hitCount := recordHitAndGetCount(srcIP)
-
-		log.Printf("[UDP] %s:%d -> %s:%d len=%d ts=%s",
-			srcIP, udp.SrcPort, dstIP, udp.DstPort, payloadLen, time.Now().Format(time.RFC3339Nano))
+		nowStr := time.Now().Format("15:04:05.000")
 
 		// Set a key-value pair to cacheDB
 		if int(udp.DstPort) == *sftpPort {
-			log.Println("Writer: Mengabaikan penulisan untuk port SFTP")
+			recordHitWithStatus(srcIP, fmt.Sprintf("Port %d (UDP SFTP Ignored)", udp.DstPort))
+			addActivityLog(fmt.Sprintf("[%s] [UDP] %s:%d -> :%d | Writer: Abaikan port SFTP (%d)",
+				nowStr, srcIP, udp.SrcPort, udp.DstPort, *sftpPort))
 			return
 		}
-		log.Println("Writer: Menulis data...")
+
 		passwd := strconv.Itoa(int(udp.DstPort))
 		err := cdc.Set(srcIP, passwd, db)
+		var hitCount int
 		if err != nil {
-			log.Printf("Writer: Gagal menulis: %v", err)
+			hitCount = recordHitWithStatus(srcIP, fmt.Sprintf("Port %d (UDP Knock Error)", udp.DstPort))
+			addActivityLog(fmt.Sprintf("[%s] [UDP] %s:%d -> :%d | Writer ERROR: %v",
+				nowStr, srcIP, udp.SrcPort, udp.DstPort, err))
 		} else {
-			log.Println("Writer: Berhasil menulis: " + srcIP + ":" + passwd)
+			hitCount = recordHitWithStatus(srcIP, fmt.Sprintf("Knock Active (UDP Port %s)", passwd))
+			addActivityLog(fmt.Sprintf("[%s] [UDP] %s:%d -> :%d | Writer: Set knock passwd=%s",
+				nowStr, srcIP, udp.SrcPort, udp.DstPort, passwd))
 		}
 
 		// Asynchronous CTI enrichment and metadata push using Goroutine
@@ -238,11 +245,8 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			decoded := []gopacket.LayerType{}
 			if err := parser.DecodeLayers(icmp.Payload, &decoded); err == nil {
 				if contains(decoded, layers.LayerTypeUDP) {
-					log.Printf("[ICMP-UR] dst-unreach/port (%d) %s -> %s  origUDP %s:%d -> %s:%d ts=%s",
-						icmp.TypeCode.Code(),
-						srcIP, dstIP,
-						ip4.SrcIP, udp.SrcPort, ip4.DstIP, udp.DstPort,
-						time.Now().Format(time.RFC3339Nano))
+					addActivityLog(fmt.Sprintf("[%s] [ICMP-UR] port unreach %s -> %s (Orig UDP :%d)",
+						time.Now().Format("15:04:05.000"), srcIP, dstIP, udp.DstPort))
 
 					if ctiLogger != nil {
 						go func(srcIP, dstIP string, packet gopacket.Packet, typeCode layers.ICMPv4TypeCode, oSrc, oDst EndpointInfo) {
@@ -269,10 +273,8 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			}
 
 			// Fallback kalau parsing payload gagal
-			log.Printf("[ICMP-UR] dst-unreach/port (%d) %s -> %s ts=%s",
-				icmp.TypeCode.Code(),
-				srcIP, dstIP,
-				time.Now().Format(time.RFC3339Nano))
+			addActivityLog(fmt.Sprintf("[%s] [ICMP-UR] port unreach %s -> %s (Code %d)",
+				time.Now().Format("15:04:05.000"), srcIP, dstIP, icmp.TypeCode.Code()))
 
 			if ctiLogger != nil {
 				go func(srcIP, dstIP string, packet gopacket.Packet, typeCode layers.ICMPv4TypeCode) {

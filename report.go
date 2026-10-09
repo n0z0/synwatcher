@@ -8,28 +8,62 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"github.com/olekukonko/tablewriter"
 )
 
 var (
 	renderMu     sync.Mutex
 	renderNotify = make(chan struct{}, 1)
+
+	// Rolling buffer untuk aktivitas log writer dan paket terakhir (5 baris)
+	recentLogsMu sync.Mutex
+	recentLogs   []string
+
+	// Status knock port terakhir per IP
+	lastStatusMu sync.Mutex
+	lastStatus   = make(map[string]string)
+
+	stdoutWriter = colorable.NewColorableStdout()
+	isTerminal   = isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
 )
 
 type ipHitEntry struct {
-	ip    string
-	count int
+	ip     string
+	count  int
+	status string
 }
 
 func init() {
-	// Worker background untuk me-render tabel secara stabil, terurut, dan throttled
-	go tableRenderWorker()
+	// Background worker untuk rendering dashboard secara terkoordinasi (in-place & throttled)
+	go dashboardRenderWorker()
 }
 
-func tableRenderWorker() {
-	// Batasi frekuensi render tabel maksimal 1x per 500ms saat ada banjir port scan masif
-	// agar layar tidak membludak, garis tabel tidak rusak, dan teks stabil terbaca
-	const minInterval = 500 * time.Millisecond
+// addActivityLog mencatat aktivitas terbaru ke rolling slot bawah (maksimal 5 baris)
+// dan memicu pembaruan tampilan di tempat (in-place) tanpa memicu scroll.
+func addActivityLog(msg string) {
+	recentLogsMu.Lock()
+	if len(recentLogs) >= 5 {
+		recentLogs = recentLogs[1:]
+	}
+	recentLogs = append(recentLogs, msg)
+	recentLogsMu.Unlock()
+
+	triggerDashboardRender()
+}
+
+func triggerDashboardRender() {
+	select {
+	case renderNotify <- struct{}{}:
+	default:
+	}
+}
+
+func dashboardRenderWorker() {
+	// Batasi frekuensi refresh maksimal 1x per 200ms saat banjir scan cepat
+	// agar CPU hemat, render mulus, dan layar terminal tidak bergetar
+	const minInterval = 200 * time.Millisecond
 	var lastRender time.Time
 
 	for range renderNotify {
@@ -38,35 +72,41 @@ func tableRenderWorker() {
 			time.Sleep(minInterval - elapsed)
 		}
 
-		// Kuras sinyal yang masuk selama masa sleep agar tidak rendering berulang tanpa jeda
 		select {
 		case <-renderNotify:
 		default:
 		}
 
-		renderTableNow()
+		renderDashboardNow()
 		lastRender = time.Now()
 	}
 }
 
-// renderTableNow menyusun tabel secara deterministik dan mencetaknya secara atomic
-func renderTableNow() {
+// renderDashboardNow me-render split dashboard (Tabel di atas + Rolling Log di bawah)
+// menggunakan ANSI Cursor Home (\033[H) agar selalu menimpa di tempat tanpa scroll.
+func renderDashboardNow() {
+	renderMu.Lock()
+	defer renderMu.Unlock()
+
 	hitunganMu.Lock()
 	if len(hitungan) == 0 {
 		hitunganMu.Unlock()
 		return
 	}
 
-	// Salin data dan urutkan secara konsisten:
-	// 1. Jumlah scan terbanyak di atas (descending)
-	// 2. Jika jumlah sama, urutkan berdasarkan IP secara alfabetis (ascending)
-	// Mencegah baris tabel melompat-lompat posisi akibat urutan acak map di Go
+	lastStatusMu.Lock()
 	entries := make([]ipHitEntry, 0, len(hitungan))
 	for ip, count := range hitungan {
-		entries = append(entries, ipHitEntry{ip: ip, count: count})
+		st := lastStatus[ip]
+		if st == "" {
+			st = "Scanning..."
+		}
+		entries = append(entries, ipHitEntry{ip: ip, count: count, status: st})
 	}
+	lastStatusMu.Unlock()
 	hitunganMu.Unlock()
 
+	// Urutkan konsisten: jumlah scan terbanyak di atas (descending), lalu IP (ascending)
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].count != entries[j].count {
 			return entries[i].count > entries[j].count
@@ -74,35 +114,68 @@ func renderTableNow() {
 		return entries[i].ip < entries[j].ip
 	})
 
+	recentLogsMu.Lock()
+	logsCopy := make([]string, len(recentLogs))
+	copy(logsCopy, recentLogs)
+	recentLogsMu.Unlock()
+
 	var buf bytes.Buffer
-	buf.WriteString("--- Hasil Hitungan ---\n")
+
+	// Jika terminal interaktif (PowerShell / Windows Terminal / Linux bash),
+	// gunakan ANSI Cursor Home (\033[H) agar selalu menimpa di tempat tanpa scroll.
+	if isTerminal {
+		buf.WriteString("\033[H")
+	}
+
+	buf.WriteString("========================== SYNWATCHER LIVE DASHBOARD ==========================\n")
+	buf.WriteString("--- Rekapitulasi Pemindaian Port (In-Place Update) ---\n")
 
 	table := tablewriter.NewWriter(&buf)
-	table.Header([]string{"IP", "Jumlah"})
+	table.Header([]string{"IP Penyerang", "Jumlah Scan", "Status Terakhir (Port Knock)"})
 	for _, e := range entries {
-		table.Append([]string{e.ip, fmt.Sprintf("%d", e.count)})
+		table.Append([]string{e.ip, fmt.Sprintf("%d", e.count), e.status})
 	}
 	table.Render()
 
-	// Cetak seluruh blok tabel sekaligus dengan mutex eksklusif
-	// agar tidak terpotong di tengah baris oleh goroutine log lain
-	renderMu.Lock()
-	os.Stdout.Write(buf.Bytes())
-	renderMu.Unlock()
+	buf.WriteString("\n--- Log Aktivitas Terakhir (Rolling Buffer 5 Baris) ---\n")
+	if len(logsCopy) == 0 {
+		buf.WriteString("  [Menunggu paket pemindaian masuk...]\n")
+	} else {
+		for _, l := range logsCopy {
+			buf.WriteString("  " + l + "\n")
+		}
+	}
+	// Pad slot jika belum 5 baris agar tinggi tampilan selalu konstan
+	for i := len(logsCopy); i < 5; i++ {
+		buf.WriteString("  ~\n")
+	}
+	buf.WriteString("==============================================================================\n")
+
+	if isTerminal {
+		// Bersihkan baris sisa di bawah jika frame sebelumnya lebih panjang
+		buf.WriteString("\033[J")
+	}
+
+	stdoutWriter.Write(buf.Bytes())
 }
 
 func recordHitAndGetCount(srcIP string) int {
+	return recordHitWithStatus(srcIP, "")
+}
+
+func recordHitWithStatus(srcIP string, status string) int {
 	hitunganMu.Lock()
 	hitungan[srcIP]++
 	count := hitungan[srcIP]
 	hitunganMu.Unlock()
 
-	// Picu render tabel secara non-blocking ke background worker
-	select {
-	case renderNotify <- struct{}{}:
-	default:
+	if status != "" {
+		lastStatusMu.Lock()
+		lastStatus[srcIP] = status
+		lastStatusMu.Unlock()
 	}
 
+	triggerDashboardRender()
 	return count
 }
 
@@ -111,5 +184,5 @@ func recordAndPrintHitungan(srcIP string) {
 }
 
 func printHitungan(hitungan map[string]int) {
-	renderTableNow()
+	renderDashboardNow()
 }
