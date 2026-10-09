@@ -83,10 +83,28 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 			nowStr := time.Now().Format("15:04:05.000")
 
 			// Set a key-value pair to cacheDB (Critical Path untuk port knock)
-			if int(tcp.DstPort) == *sftpPort {
-				recordHitWithStatus(srcIP, fmt.Sprintf("Port %d (SFTP Ignored)", tcp.DstPort))
-				addActivityLog(fmt.Sprintf("[%s] [SYN] %s:%d -> :%d (%s) | Writer: Abaikan port SFTP (%d)",
-					nowStr, srcIP, tcp.SrcPort, tcp.DstPort, strings.Join(flags, "|"), *sftpPort))
+			if ignored, svcName := isIgnoredPort(int(tcp.DstPort)); ignored {
+				hitCount := recordHitWithStatus(srcIP, fmt.Sprintf("Port %d (%s Ignored)", tcp.DstPort, svcName))
+				addActivityLog(fmt.Sprintf("[%s] [SYN] %s:%d -> :%d (%s) | Writer: Abaikan port %s (%d)",
+					nowStr, srcIP, tcp.SrcPort, tcp.DstPort, strings.Join(flags, "|"), svcName, tcp.DstPort))
+
+				// Tetap catat CTI telemetry secara asinkron tanpa menimpa password port knock
+				if ctiLogger != nil {
+					go func(srcIP, dstIP string, srcPort, dstPort int, win uint16, seq, ack uint32, tcpFlags, tcpOptions []string, packet gopacket.Packet, hits int) {
+						ctiEvent := newCTIBaseEvent("TCP_SYN_SCAN", srcIP, srcPort, dstIP, dstPort, packet, hits, win, tcpFlags, tcpOptions)
+						ctiEvent.TCPLayer = &TCPLayerInfo{
+							SeqNum:     seq,
+							AckNum:     ack,
+							WindowSize: win,
+							Flags:      tcpFlags,
+							Options:    tcpOptions,
+						}
+						if !ctiEvent.Source.IsPrivate && srcIP != "127.0.0.1" && srcIP != "::1" {
+							ctiEvent.Source.ReverseDNS = getReverseDNS(srcIP)
+						}
+						ctiLogger.LogEvent(ctiEvent)
+					}(srcIP, dstIP, int(tcp.SrcPort), int(tcp.DstPort), tcp.Window, tcp.Seq, tcp.Ack, flags, options, pkt, hitCount)
+				}
 				return
 			}
 
@@ -174,10 +192,24 @@ func handlePacket(pkt gopacket.Packet, db cachepb.CacheClient) {
 		nowStr := time.Now().Format("15:04:05.000")
 
 		// Set a key-value pair to cacheDB
-		if int(udp.DstPort) == *sftpPort {
-			recordHitWithStatus(srcIP, fmt.Sprintf("Port %d (UDP SFTP Ignored)", udp.DstPort))
-			addActivityLog(fmt.Sprintf("[%s] [UDP] %s:%d -> :%d | Writer: Abaikan port SFTP (%d)",
-				nowStr, srcIP, udp.SrcPort, udp.DstPort, *sftpPort))
+		if ignored, svcName := isIgnoredPort(int(udp.DstPort)); ignored {
+			hitCount := recordHitWithStatus(srcIP, fmt.Sprintf("Port %d (%s Ignored)", udp.DstPort, svcName))
+			addActivityLog(fmt.Sprintf("[%s] [UDP] %s:%d -> :%d | Writer: Abaikan port %s (%d)",
+				nowStr, srcIP, udp.SrcPort, udp.DstPort, svcName, udp.DstPort))
+
+			if ctiLogger != nil {
+				go func(srcIP, dstIP string, srcPort, dstPort int, udpLen uint16, pLen int, packet gopacket.Packet, hits int) {
+					ctiEvent := newCTIBaseEvent("UDP_PROBE", srcIP, srcPort, dstIP, dstPort, packet, hits, 0, nil, nil)
+					ctiEvent.UDPLayer = &UDPLayerInfo{
+						Length:     udpLen,
+						PayloadLen: pLen,
+					}
+					if !ctiEvent.Source.IsPrivate && srcIP != "127.0.0.1" && srcIP != "::1" {
+						ctiEvent.Source.ReverseDNS = getReverseDNS(srcIP)
+					}
+					ctiLogger.LogEvent(ctiEvent)
+				}(srcIP, dstIP, int(udp.SrcPort), int(udp.DstPort), udp.Length, payloadLen, pkt, hitCount)
+			}
 			return
 		}
 

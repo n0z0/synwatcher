@@ -198,14 +198,18 @@ Integritas semua file dapat diverifikasi dengan `checksums.txt`.
 | Flag       | Default                 | Keterangan                                   |
 |------------|-------------------------|----------------------------------------------|
 | `-iface`   | *(auto)*                | Nama device Npcap `\Device\NPF_{GUID}`       |
-| `-sftpport`| `60606`                 | Port SFTP honeypot yang diabaikan (agar koneksi login tidak menimpa password) |
-| `-logfile` | `synwatcher_cti.jsonl`  | File output log CTI (format JSONL, kosongkan untuk mematikan) |
-| `-sensor`  | *(hostname)*            | Identifier sensor node honeypot              |
-| `-bpf`     | *(lihat bawah)*         | Filter BPF untuk paket yang ditangkap        |
-| `-snaplen` | `96`                    | Jumlah byte yang diambil per paket           |
-| `-promisc` | `true`                  | Mode promiscuous                             |
-| `-timeout` | `BlockForever`          | Timeout pembacaan pcap                       |
-| `-version` |                         | Tampilkan versi lalu keluar                  |
+| `-sftpport`      | `60606`                 | Port SFTP honeypot (scp) yang diabaikan dari penulisan knock password |
+| `-classrootport` | `8443`                  | Port WebRTC decoy (ClassRoot) yang diabaikan dari penulisan knock password |
+| `-lemesport`     | `50505`                 | Port Honeybeacon HTTP decoy (lemes) yang diabaikan dari penulisan knock password |
+| `-cachedbport`   | `50051`                 | Port gRPC bus (cacheDB) yang diabaikan dari penulisan knock password |
+| `-ignoreports`   | *(kosong)*              | Daftar port tambahan yang diabaikan (dipisahkan koma, contoh: `8080,9000`) |
+| `-logfile`       | `synwatcher_cti.jsonl`  | File output log CTI (format JSONL, kosongkan untuk mematikan) |
+| `-sensor`        | *(hostname)*            | Identifier sensor node honeypot              |
+| `-bpf`           | *(lihat bawah)*         | Filter BPF untuk paket yang ditangkap        |
+| `-snaplen`       | `96`                    | Jumlah byte yang diambil per paket           |
+| `-promisc`       | `true`                  | Mode promiscuous                             |
+| `-timeout`       | `BlockForever`          | Timeout pembacaan pcap                       |
+| `-version`       |                         | Tampilkan versi lalu keluar                  |
 
 ### Data Log untuk Cyber Threat Intelligence (CTI SOC-Grade)
 
@@ -272,7 +276,12 @@ Contoh satu baris log SOC-Grade:
 Semua paket hanya diproses jika **tujuannya IP mesin ini**. Paket berikut diabaikan:
 
 - trafik keluar dari mesin ini sendiri dan loopback
-- port SFTP honeypot (`60606` atau sesuai `-sftpport`), supaya login ke SFTP tidak menimpa password
+- port layanan decoy internal dan honeypot ekosistem aktif agar tidak menimpa password knock:
+  - SFTP honeypot `scp` (`60606` atau `-sftpport`)
+  - WebRTC meeting room decoy `ClassRoot` (`8443` atau `-classrootport`)
+  - Honeybeacon HTTP decoy `lemes` (`50505` atau `-lemesport`)
+  - In-memory threat bus `cacheDB` (`50051` atau `-cachedbport`)
+  - Port kustom lainnya via `-ignoreports`
 - UDP port `53, 443, 123, 161, 1900, 5353` (DNS, QUIC, NTP, SNMP, SSDP, mDNS)
 
 > **Catatan:** UDP dari internet sengaja tidak dideteksi. Balasan UDP dari

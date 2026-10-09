@@ -76,6 +76,7 @@ func main() {
 	}
 	log.Printf("[*] Sniffing on: %s", dev)
 	log.Printf("[*] BPF: %s", *bpf)
+	log.Printf("[*] Ignored Ports (No-Knock): SFTP=%d, ClassRoot=%d, Lemes=%d, CacheDB=%d", *sftpPort, *classrootPort, *lemesPort, *cachedbPort)
 
 	// Buka DB
 	// Connect to cache server

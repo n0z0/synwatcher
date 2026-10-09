@@ -64,3 +64,25 @@ func TestTableSortAndRender(t *testing.T) {
 		t.Errorf("Expected recentLogs capped at 5 lines, got %d", logCount)
 	}
 }
+
+func TestIgnoredPorts(t *testing.T) {
+	testCases := []struct {
+		port        int
+		shouldIgnore bool
+	}{
+		{60606, true},  // scp SFTP
+		{8443, true},   // ClassRoot WebRTC
+		{50505, true},  // lemes HTTP Honeybeacon
+		{50051, true},  // cacheDB gRPC
+		{80, false},    // Standard web (should be knocked)
+		{443, false},   // Standard https (should be knocked)
+		{22, false},    // Standard ssh (should be knocked)
+	}
+
+	for _, tc := range testCases {
+		ignored, svc := isIgnoredPort(tc.port)
+		if ignored != tc.shouldIgnore {
+			t.Errorf("Port %d: expected ignored=%v, got %v (%s)", tc.port, tc.shouldIgnore, ignored, svc)
+		}
+	}
+}
