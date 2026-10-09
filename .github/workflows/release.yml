@@ -44,6 +44,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Bersihkan replace directive lokal
+        run: go mod edit -dropreplace github.com/n0z0/cachedb || true
+
       - name: Vet
         # Target Windows: di Linux gopacket/pcap butuh cgo + libpcap sehingga vet gagal
         env:

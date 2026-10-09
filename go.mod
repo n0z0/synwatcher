@@ -4,7 +4,7 @@ go 1.25.3
 
 require (
 	github.com/google/gopacket v1.1.19
-	github.com/n0z0/cachedb v0.1.6
+	github.com/n0z0/cachedb v0.1.13
 	github.com/olekukonko/tablewriter v1.1.1
 )
 
@@ -26,5 +26,3 @@ require (
 	google.golang.org/grpc v1.76.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 )
-
-replace github.com/n0z0/cachedb => ../cachedb
