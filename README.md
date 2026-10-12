@@ -1,10 +1,10 @@
 # synwatcher
 
 Detektor **port scan** (nmap `-sS`, `-sT`, `-sU`) untuk Windows, bagian dari honeypot
-[n0z0/scp](https://github.com/n0z0/scp).
+[n0z0/scpd](https://github.com/n0z0/scpd).
 
 Setiap kali sebuah IP men-scan port di mesin ini, synwatcher menyimpan pasangan
-**IP → port** ke [cacheDB](https://github.com/n0z0/cachedb). Server SFTP `scp` lalu
+**IP → port** ke [cacheDB](https://github.com/n0z0/cachedb). Server SFTP `scpd` lalu
 menerima login dengan:
 
 | Field    | Nilai                          |
@@ -16,7 +16,7 @@ menerima login dengan:
 flowchart LR
     A[Penyerang] -- "SYN / UDP probe ke port X" --> B[synwatcher]
     B -- "Set(IP, X)" --> C[(cacheDB :50051)]
-    A -- "login SFTP user=IP pass=X" --> D[scp :60606]
+    A -- "login SFTP user=IP pass=X" --> D[scpd :60606]
     D -- "Get(IP)" --> C
 ```
 
@@ -104,7 +104,7 @@ nc -zv <IP_TARGET> 8080
 
 ---
 
-### Langkah Login ke Server SFTP (`scp`)
+### Langkah Login ke Server SFTP (`scpd`)
 
 Setelah menyentuh port (misalnya port `8080`), segera login ke server SFTP honeypot di port `60606`:
 
@@ -132,7 +132,7 @@ Anda akan berhasil masuk ke sesi SFTP, dan honeypot akan memproses forensik file
 2. **[Npcap](https://npcap.com/#download)**: saat instalasi, centang
    *Install Npcap in WinPcap API-compatible Mode*
 3. **cacheDB** berjalan di `127.0.0.1:50051`
-4. (Opsional) **scp** berjalan di port `60606`
+4. (Opsional) **scpd** berjalan di port `60606`
 
 ### Instalasi & Upgrade Otomatis
 
@@ -198,7 +198,7 @@ Integritas semua file dapat diverifikasi dengan `checksums.txt`.
 | Flag       | Default                 | Keterangan                                   |
 |------------|-------------------------|----------------------------------------------|
 | `-iface`   | *(auto)*                | Nama device Npcap `\Device\NPF_{GUID}`       |
-| `-sftpport`      | `60606`                 | Port SFTP honeypot (scp) yang diabaikan dari penulisan knock password |
+| `-sftpport`      | `60606`                 | Port SFTP honeypot (scpd) yang diabaikan dari penulisan knock password |
 | `-classrootport` | `8443`                  | Port WebRTC decoy (ClassRoot) yang diabaikan dari penulisan knock password |
 | `-lemesport`     | `50505`                 | Port Honeybeacon HTTP decoy (lemes) yang diabaikan dari penulisan knock password |
 | `-cachedbport`   | `50051`                 | Port gRPC bus (cacheDB) yang diabaikan dari penulisan knock password |
@@ -277,7 +277,7 @@ Semua paket hanya diproses jika **tujuannya IP mesin ini**. Paket berikut diabai
 
 - trafik keluar dari mesin ini sendiri dan loopback
 - port layanan decoy internal dan honeypot ekosistem aktif agar tidak menimpa password knock:
-  - SFTP honeypot `scp` (`60606` atau `-sftpport`)
+  - SFTP honeypot `scpd` (`60606` atau `-sftpport`)
   - WebRTC meeting room decoy `ClassRoot` (`8443` atau `-classrootport`)
   - Honeybeacon HTTP decoy `lemes` (`50505` atau `-lemesport`)
   - In-memory threat bus `cacheDB` (`50051` atau `-cachedbport`)
